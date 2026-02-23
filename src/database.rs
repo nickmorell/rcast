@@ -1,5 +1,8 @@
+use std::fs;
 use std::sync::{Arc, Mutex};
 
+use dirs::data_local_dir;
+use fs::create_dir_all;
 use rusqlite::Connection;
 
 use crate::{
@@ -15,7 +18,10 @@ pub struct Database {
 
 impl Default for Database {
     fn default() -> Self {
-        let mut connection = Connection::open("rcast.db").unwrap();
+        let path = data_local_dir().unwrap().join("rcast").join("rcast.db");
+        create_dir_all(&path).ok();
+
+        let mut connection = Connection::open(path).unwrap();
         connection.execute("PRAGMA foreign_keys = ON", []).unwrap();
 
         run_migrations(&mut connection).unwrap();

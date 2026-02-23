@@ -1,5 +1,6 @@
+use dirs::data_local_dir;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::File;
+use std::fs::{File, create_dir_all};
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -10,10 +11,15 @@ pub struct AudioDownloader {
 
 impl AudioDownloader {
     pub fn new() -> Self {
-        let cache_dir = PathBuf::from("./cache/audio");
-        std::fs::create_dir_all(&cache_dir).ok();
+        let path = data_local_dir()
+            .unwrap()
+            .join("rcast")
+            .join("cache")
+            .join("audio");
+        println!("Audio cache directory: {:?}", &path);
+        create_dir_all(&path).unwrap();
 
-        Self { cache_dir }
+        Self { cache_dir: path }
     }
 
     fn hash_url(url: &str) -> u64 {
