@@ -1,7 +1,10 @@
+use dirs::data_local_dir;
 use egui::{ColorImage, TextureHandle};
 use std::collections::HashMap;
+use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use url::Url;
 
 pub struct ImageCache {
     cache_dir: PathBuf,
@@ -10,18 +13,22 @@ pub struct ImageCache {
 
 impl ImageCache {
     pub fn new() -> Self {
-        let cache_dir = PathBuf::from("./cache/images");
-        std::fs::create_dir_all(&cache_dir).ok();
+        let path = data_local_dir()
+            .unwrap()
+            .join("rcast")
+            .join("cache")
+            .join("images");
+        create_dir_all(path.clone()).unwrap();
 
         Self {
-            cache_dir,
+            cache_dir: path,
             textures: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn get_or_load(&self, url: &str, ctx: &egui::Context) -> Option<TextureHandle> {
-        let cache_key = self.url_to_cache_key(url);
-
+    pub fn get_or_load(&self, mut url: &str, ctx: &egui::Context) -> Option<TextureHandle> {
+        let parsed_url = Self::strip_query(url).unwrap();
+        let cache_key = self.url_to_cache_key(parsed_url.as_str());
         {
             let textures = self.textures.lock().unwrap();
             if let Some(texture) = textures.get(&cache_key) {
@@ -119,5 +126,11 @@ impl ImageCache {
         }
 
         texture
+    }
+
+    fn strip_query(url_str: &str) -> Result<Url, url::ParseError> {
+        let mut url = Url::parse(url_str)?;
+        url.set_query(None);
+        Ok(url)
     }
 }

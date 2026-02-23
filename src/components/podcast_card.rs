@@ -66,7 +66,10 @@ impl<'a> PodcastCard<'a> {
             let texture = self
                 .image_cache
                 .get_or_load(&self.podcast.image_url, ui.ctx())
-                .unwrap_or_else(|| self.image_cache.get_default_texture(ui.ctx()));
+                .unwrap_or_else(|| {
+                    println!("Failed to load image for podcast: {}", &self.podcast.title);
+                    self.image_cache.get_default_texture(ui.ctx())
+                });
 
             ui.put(
                 image_rect,
