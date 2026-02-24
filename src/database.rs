@@ -90,6 +90,30 @@ impl Database {
         Ok(episodes)
     }
 
+    pub fn get_episode_by_id(&self, id: i32) -> Result<Episode, DatabaseError> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::LockPoisoned)?;
+        let episode = conn.query_one("SELECT * FROM episodes WHERE id = ?", [id], |row| {
+            Ok(Episode {
+                id: row.get(0)?,
+                podcast_id: row.get(1)?,
+                title: row.get(2)?,
+                description: row.get(3)?,
+                url: row.get(4)?,
+                audio_type: row.get(5)?,
+                publish_date: row.get(6)?,
+                is_played: row.get::<_, i32>(7)? == 1,
+                duration: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })?;
+
+        Ok(episode)
+    }
+
     pub fn add_podcast(&self, podcast: &Podcast) -> Result<i32, DatabaseError> {
         let conn = self
             .connection
