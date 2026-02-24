@@ -159,7 +159,7 @@ impl MediaControls {
                                     .update_while_editing(true)
                                     .trailing_fill(true);
 
-                                let slider_response = ui.add_sized([ui.available_width(), 20.0], slider);
+                                let slider_response = ui.add_enabled(has_audio,  slider);
 
                                 if has_audio && slider_response.changed() {
                                     action = MediaControlsAction::Seek(Duration::from_secs_f32(pos_secs));
