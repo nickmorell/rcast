@@ -112,11 +112,10 @@ impl RCast {
                                     .get_or_download(&episode.url, episode_id)
                                 {
                                     Ok(path) => {
-                                        if let Err(e) = self.audio_player.play(
-                                            path.to_str().unwrap(),
-                                            episode_id,
-                                            episode.duration,
-                                        ) {
+                                        if let Err(e) = self
+                                            .audio_player
+                                            .play(path.to_str().unwrap(), episode_id)
+                                        {
                                             eprintln!("Failed to play audio: {}", e);
                                         }
                                     }
