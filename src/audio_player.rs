@@ -1,6 +1,5 @@
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
-use std::io::BufReader;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +12,7 @@ pub enum PlaybackState {
 
 #[derive(Clone)]
 pub struct AudioPlayer {
-    sink: Arc<Mutex<Option<(Sink, OutputStream)>>>,
+    player: Arc<Mutex<Option<(Player, MixerDeviceSink)>>>,
     current_episode_id: Arc<Mutex<Option<i32>>>,
     playback_speed: Arc<Mutex<f32>>,
     state: Arc<Mutex<PlaybackState>>,
@@ -23,7 +22,7 @@ pub struct AudioPlayer {
 impl AudioPlayer {
     pub fn new() -> Self {
         Self {
-            sink: Arc::new(Mutex::new(None)),
+            player: Arc::new(Mutex::new(None)),
             current_episode_id: Arc::new(Mutex::new(None)),
             playback_speed: Arc::new(Mutex::new(1.0)),
             state: Arc::new(Mutex::new(PlaybackState::Stopped)),
@@ -31,95 +30,90 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play(
-        &self,
-        audio_path: &str,
-        episode_id: i32,
-        duration_secs: i64,
-    ) -> Result<(), String> {
+    pub fn play(&self, audio_path: &str, episode_id: i32) -> Result<(), String> {
         let file = File::open(audio_path).map_err(|e| e.to_string())?;
-        let source = Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?;
+        let source = Decoder::try_from(file).map_err(|e| e.to_string())?;
+        let secs = source.total_duration().unwrap();
+        let mut player_guard = self.player.lock().unwrap();
 
-        let mut sink_guard = self.sink.lock().unwrap();
-
-        if let Some((old_sink, _)) = sink_guard.take() {
-            old_sink.stop();
+        if let Some((old_player, _)) = player_guard.take() {
+            old_player.stop();
         }
 
-        let (_stream, stream_handle) = OutputStream::try_default().map_err(|e| e.to_string())?;
-        let new_sink = Sink::try_new(&stream_handle).map_err(|e| e.to_string())?;
+        let stream = DeviceSinkBuilder::open_default_sink().map_err(|e| e.to_string())?;
+        let new_player = Player::connect_new(&stream.mixer());
         let speed = *self.playback_speed.lock().unwrap();
-        new_sink.append(source.speed(speed));
-        new_sink.play();
+        new_player.append(source.speed(speed));
+        new_player.play();
 
-        *sink_guard = Some((new_sink, _stream));
+        *player_guard = Some((new_player, stream));
         *self.current_episode_id.lock().unwrap() = Some(episode_id);
         *self.state.lock().unwrap() = PlaybackState::Playing;
-        *self.duration.lock().unwrap() = Duration::from_secs(duration_secs as u64);
+        *self.duration.lock().unwrap() = Duration::from_secs(secs.as_secs());
 
         Ok(())
     }
 
     pub fn pause(&self) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.pause();
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.pause();
             *self.state.lock().unwrap() = PlaybackState::Paused;
         }
     }
 
     pub fn resume(&self) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.play();
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.play();
             *self.state.lock().unwrap() = PlaybackState::Playing;
         }
     }
 
     pub fn stop(&self) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().take() {
-            sink.stop();
+        if let Some((player, _)) = self.player.lock().unwrap().take() {
+            player.stop();
         }
         *self.current_episode_id.lock().unwrap() = None;
         *self.state.lock().unwrap() = PlaybackState::Stopped;
     }
 
     pub fn set_volume(&self, volume: f32) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.set_volume(volume / 100.0);
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.set_volume(volume / 100.0);
         }
     }
 
     pub fn set_speed(&self, speed: f32) {
         *self.playback_speed.lock().unwrap() = speed;
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.set_speed(speed);
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.set_speed(speed);
         }
     }
 
     pub fn seek(&self, position: Duration) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.try_seek(position).ok();
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.try_seek(position).ok();
         }
     }
 
     pub fn skip_forward(&self, seconds: i32) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            let current = sink.get_pos();
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            let current = player.get_pos();
             let new_pos = current + Duration::from_secs(seconds as u64);
-            sink.try_seek(new_pos).ok();
+            player.try_seek(new_pos).ok();
         }
     }
 
     pub fn skip_backward(&self, seconds: i32) {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            let current = sink.get_pos();
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            let current = player.get_pos();
             let new_pos = current.saturating_sub(Duration::from_secs(seconds as u64));
-            sink.try_seek(new_pos).ok();
+            player.try_seek(new_pos).ok();
         }
     }
 
     pub fn get_position(&self) -> Duration {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.get_pos()
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.get_pos()
         } else {
             Duration::from_secs(0)
         }
@@ -142,8 +136,8 @@ impl AudioPlayer {
     }
 
     pub fn is_finished(&self) -> bool {
-        if let Some((sink, _)) = self.sink.lock().unwrap().as_ref() {
-            sink.empty() && *self.state.lock().unwrap() == PlaybackState::Playing
+        if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            player.empty() && *self.state.lock().unwrap() == PlaybackState::Playing
         } else {
             false
         }
