@@ -145,8 +145,16 @@ impl HomePage {
                 ui.add_space(5.0);
                 ui.horizontal_wrapped(|ui| {
                     for podcast in &self.filtered_podcasts {
+                        ui.add_space(10.0);
                         let podcast_id = podcast.id.unwrap();
-                        let is_playing = current_episode_id.is_some();
+
+                        let mut is_playing = false;
+                        if current_episode_id.is_some() {
+                            let episode = database.get_episode_by_id(current_episode_id.unwrap());
+                            if podcast_id == episode.unwrap().podcast_id {
+                                is_playing = true;
+                            }
+                        }
 
                         if PodcastCard::new(podcast, database, image_cache, is_playing)
                             .show(ui)
