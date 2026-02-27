@@ -88,53 +88,14 @@ impl RCast {
     fn handle_episode_action(&mut self, action: EpisodeAction) {
         match action {
             EpisodeAction::Play(episode_id) => {
-                println!("Playing episode ID {}", episode_id);
-                if let Ok(podcasts) = self.database.get_podcasts() {
-                    let mut found = false;
-                    for podcast in podcasts {
-                        if let Ok(episodes) = self
-                            .database
-                            .get_episodes_by_podcast_id(podcast.id.unwrap())
-                        {
-                            if let Some(episode) =
-                                episodes.iter().find(|e| e.id == Some(episode_id))
-                            {
-                                println!(
-                                    "Playing episode ID {} from podcast '{}' (podcast_id: {:?})",
-                                    episode_id, podcast.title, podcast.id
-                                );
-                                self.current_episode = Some(episode.clone());
-                                self.current_podcast_title = Some(podcast.title.clone());
-
-                                println!("Playing episode URL: {}", episode.url);
-                                match self
-                                    .audio_downloader
-                                    .get_or_download(&episode.url, episode_id)
-                                {
-                                    Ok(path) => {
-                                        if let Err(e) = self
-                                            .audio_player
-                                            .play(path.to_str().unwrap(), episode_id)
-                                        {
-                                            eprintln!("Failed to play audio: {}", e);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to download/play audio: {}", e);
-                                    }
-                                }
-
-                                found = true;
-                                break;
-                            }
-                        }
-                        if found {
-                            break;
-                        }
-                    }
-                    if !found {
-                        eprintln!("Episode ID {} not found in any podcast", episode_id);
-                    }
+                self.play_episode(episode_id);
+            }
+            EpisodeAction::PlayAll(episode_id, episode_ids) => {
+                self.play_episode(episode_id);
+                let mut episode_ids = episode_ids.clone();
+                episode_ids.retain(|id| *id != episode_id);
+                for episode_id in episode_ids {
+                    self.database.add_to_queue(episode_id).ok();
                 }
             }
             EpisodeAction::Pause => {
@@ -165,6 +126,54 @@ impl RCast {
             }
             EpisodeAction::AddToQueue(episode_id) => {
                 self.database.add_to_queue(episode_id).ok();
+            }
+        }
+    }
+
+    fn play_episode(&mut self, episode_id: i32) {
+        println!("Playing episode ID {}", episode_id);
+        if let Ok(podcasts) = self.database.get_podcasts() {
+            let mut found = false;
+            for podcast in podcasts {
+                if let Ok(episodes) = self
+                    .database
+                    .get_episodes_by_podcast_id(podcast.id.unwrap())
+                {
+                    if let Some(episode) = episodes.iter().find(|e| e.id == Some(episode_id)) {
+                        println!(
+                            "Playing episode ID {} from podcast '{}' (podcast_id: {:?})",
+                            episode_id, podcast.title, podcast.id
+                        );
+                        self.current_episode = Some(episode.clone());
+                        self.current_podcast_title = Some(podcast.title.clone());
+
+                        println!("Playing episode URL: {}", episode.url);
+                        match self
+                            .audio_downloader
+                            .get_or_download(&episode.url, episode_id)
+                        {
+                            Ok(path) => {
+                                if let Err(e) =
+                                    self.audio_player.play(path.to_str().unwrap(), episode_id)
+                                {
+                                    eprintln!("Failed to play audio: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to download/play audio: {}", e);
+                            }
+                        }
+
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+            if !found {
+                eprintln!("Episode ID {} not found in any podcast", episode_id);
             }
         }
     }

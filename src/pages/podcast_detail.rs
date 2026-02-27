@@ -137,6 +137,16 @@ impl PodcastDetailPage {
                                 }
                             }
                         }
+                        // here
+                        if ui.button("Play All").clicked() {
+                            let (first, episodes) = self.filtered_episodes.split_first().unwrap();
+
+                            episode_action = Some(EpisodeAction::PlayAll(
+                                first.id.unwrap(),
+                                episodes.iter().map(|e| e.id.unwrap()).collect(),
+                            ));
+                            println!("Play all episodes");
+                        }
                     });
                 });
 
@@ -318,6 +328,7 @@ impl PodcastDetailPage {
 #[derive(Debug, Clone)]
 pub enum EpisodeAction {
     Play(i32),
+    PlayAll(i32, Vec<i32>),
     Pause,
     TogglePlayed(i32),
     AddToQueue(i32),
