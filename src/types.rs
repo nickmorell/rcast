@@ -62,6 +62,7 @@ pub struct Settings {
     pub skip_forward_seconds: i32,
     pub sync_interval_minutes: i32,
     pub auto_play_next: bool,
+    pub download_directory: String,
 }
 
 impl Default for Settings {
@@ -72,6 +73,11 @@ impl Default for Settings {
             skip_forward_seconds: 15,
             sync_interval_minutes: 30,
             auto_play_next: true,
+            download_directory: dirs::data_local_dir()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
         }
     }
 }

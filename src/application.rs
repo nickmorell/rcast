@@ -1,4 +1,5 @@
 use crate::components::media_controls::MediaControlsAction;
+use crate::ports::FolderPicker;
 use crate::{
     audio_downloader::AudioDownloader,
     audio_player::{AudioPlayer, PlaybackState},
@@ -9,6 +10,7 @@ use crate::{
     rss_sync::RssSync,
     types::{Episode, Page, Settings},
 };
+use std::sync::Arc;
 
 pub struct RCast {
     database: Database,
@@ -36,8 +38,8 @@ pub struct RCast {
     last_finished_episode_id: Option<i32>, // Track to prevent duplicate autoplay triggers
 }
 
-impl Default for RCast {
-    fn default() -> Self {
+impl RCast {
+    pub fn new(folder_picker: Arc<dyn FolderPicker>) -> Self {
         let database = Database::default();
         let settings = database.get_settings().unwrap_or_default();
         let audio_player = AudioPlayer::new();
@@ -56,7 +58,7 @@ impl Default for RCast {
         audio_player.set_volume(volume);
 
         let home_page = HomePage::new(&database);
-        let settings_page = SettingsPage::new(&database);
+        let settings_page = SettingsPage::new(&database, folder_picker);
 
         Self {
             image_cache: ImageCache::new(),
@@ -77,12 +79,6 @@ impl Default for RCast {
             last_finished_episode_id: None,
             database,
         }
-    }
-}
-
-impl RCast {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     fn handle_episode_action(&mut self, action: EpisodeAction) {

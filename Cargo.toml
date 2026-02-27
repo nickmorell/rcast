@@ -18,3 +18,5 @@ md5 = "0.7"
 egui_alignments = "0.3.7"
 url = "2.5.8"
 dirs = "6.0.0"
+rfd = "0.17.2"
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "sync"] }

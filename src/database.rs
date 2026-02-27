@@ -207,11 +207,31 @@ impl Database {
                     settings.sync_interval_minutes = setting.1.parse().unwrap_or(30)
                 }
                 "auto_play_next" => settings.auto_play_next = setting.1 == "true",
+                "download_directory" => settings.download_directory = setting.1,
                 _ => {}
             }
         }
 
         Ok(settings)
+    }
+
+    pub fn get_download_directory(&self) -> Result<String, DatabaseError> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::LockPoisoned)?;
+
+        let mut stmt =
+            conn.prepare("SELECT value FROM settings WHERE key = 'download_directory'")?;
+        let mut rows = stmt.query([]).unwrap();
+        let row = rows.next().unwrap().unwrap();
+        Ok(row.get(0).unwrap_or(
+            dirs::data_local_dir()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        ))
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<(), DatabaseError> {
@@ -239,6 +259,11 @@ impl Database {
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_play_next', ?)",
             [settings.auto_play_next.to_string()],
+        )?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('download_directory', ?)",
+            [settings.download_directory.to_string()],
         )?;
 
         Ok(())
