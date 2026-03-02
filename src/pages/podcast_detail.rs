@@ -304,6 +304,12 @@ impl PodcastDetailPage {
                                                         Some(EpisodeAction::AddToQueue(ep_id));
                                                     Popup::close_id(ui.ctx(), menu_id);
                                                 }
+
+                                                if ui.button("Download").clicked() {
+                                                    episode_action =
+                                                        Some(EpisodeAction::Download(ep_id));
+                                                    Popup::close_id(ui.ctx(), menu_id);
+                                                }
                                             },
                                         );
 
@@ -327,9 +333,10 @@ impl PodcastDetailPage {
 
 #[derive(Debug, Clone)]
 pub enum EpisodeAction {
+    AddToQueue(i32),
+    Download(i32),
     Play(i32),
     PlayAll(i32, Vec<i32>),
     Pause,
     TogglePlayed(i32),
-    AddToQueue(i32),
 }

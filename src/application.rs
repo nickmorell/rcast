@@ -5,6 +5,7 @@ use crate::{
     audio_player::{AudioPlayer, PlaybackState},
     components::{AddPodcastModal, MediaControls},
     database::Database,
+    download_manager::DownloadManager,
     image_cache::ImageCache,
     pages::{HomePage, PodcastDetailPage, SettingsPage, podcast_detail::EpisodeAction},
     rss_sync::RssSync,
@@ -16,6 +17,7 @@ pub struct RCast {
     database: Database,
     image_cache: ImageCache,
     audio_downloader: AudioDownloader,
+    download_manager: DownloadManager,
     audio_player: AudioPlayer,
     rss_sync: RssSync,
 
@@ -77,6 +79,7 @@ impl RCast {
             show_queue: false,
             show_speed_menu: false,
             last_finished_episode_id: None,
+            download_manager: DownloadManager::new(database.clone()),
             database,
         }
     }
@@ -122,6 +125,41 @@ impl RCast {
             }
             EpisodeAction::AddToQueue(episode_id) => {
                 self.database.add_to_queue(episode_id).ok();
+            }
+            EpisodeAction::Download(episode_id) => {
+                let database = self.database.clone();
+                let download_manager = self.download_manager.clone();
+
+                std::thread::spawn(move || {
+                    // Get episode
+                    let episode = match database.get_episode_by_id(episode_id) {
+                        Ok(episode) => episode,
+                        Err(e) => {
+                            eprintln!("Error getting episode: {}", e);
+                            return;
+                        }
+                    };
+
+                    let podcast = match database.get_podcast_by_id(episode.podcast_id) {
+                        Ok(podcast) => podcast,
+                        Err(e) => {
+                            eprintln!("Error getting podcast: {}", e);
+                            return;
+                        }
+                    };
+
+                    let folders: Vec<String> = Vec::from([podcast.title]);
+                    let file_name = episode.title.clone();
+
+                    if !download_manager.file_exists(folders.clone(), &file_name) {
+                        match download_manager.download(episode.url, folders.clone(), file_name) {
+                            Err(e) => {
+                                eprintln!("Error downloading file: {}", e);
+                            }
+                            _ => {}
+                        }
+                    }
+                });
             }
         }
     }

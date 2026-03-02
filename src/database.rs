@@ -33,6 +33,27 @@ impl Default for Database {
 }
 
 impl Database {
+    pub fn get_podcast_by_id(&self, id: i32) -> Result<Podcast, DatabaseError> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::LockPoisoned)?;
+
+        let podcast = conn.query_one("SELECT * FROM podcasts WHERE id = ?", [id], |row| {
+            Ok(Podcast {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                title: row.get(2)?,
+                description: row.get(3)?,
+                image_url: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+
+        Ok(podcast)
+    }
+
     pub fn get_podcasts(&self) -> Result<Vec<Podcast>, DatabaseError> {
         let connection = self
             .connection

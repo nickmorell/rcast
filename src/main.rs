@@ -4,6 +4,7 @@ mod audio_downloader;
 mod audio_player;
 mod components;
 mod database;
+mod download_manager;
 mod errors;
 mod image_cache;
 mod migrations;
@@ -11,6 +12,7 @@ mod pages;
 mod ports;
 mod rss_sync;
 mod types;
+mod utils;
 
 use crate::adapters::rfd_folder_picker::RfdFolderPicker;
 use crate::application::RCast;
