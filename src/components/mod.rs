@@ -1,6 +1,7 @@
 pub mod add_podcast_modal;
 pub mod media_controls;
 pub mod menu;
+pub mod notes_panel;
 pub mod podcast_card;
 pub mod toast;
 

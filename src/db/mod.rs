@@ -10,7 +10,7 @@ use rusqlite::{Connection, params};
 use crate::errors::DatabaseError;
 use crate::migrations::run_migrations;
 use crate::types::{QueueDisplayItem, QueueItem, Settings};
-use models::{Episode, Podcast};
+use models::{Bookmark, Episode, Podcast};
 
 /// Thin wrapper around a rusqlite connection pool.
 ///
@@ -321,6 +321,127 @@ impl Database {
                  WHERE id = ?2",
                 params![now, episode_id],
             )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    // ── Bookmarks ─────────────────────────────────────────────────────────────
+
+    /// Returns all bookmarks for a specific episode, ordered by position then
+    /// creation time. Includes both timed and untimed episode notes.
+    pub async fn get_bookmarks_for_episode(
+        &self,
+        episode_id: i32,
+    ) -> anyhow::Result<Vec<Bookmark>> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, podcast_id, episode_id, position_seconds, note_text,
+                        created_at, updated_at
+                 FROM bookmarks
+                 WHERE episode_id = ?1
+                 ORDER BY COALESCE(position_seconds, 9999999), created_at",
+            )?;
+
+            let rows = stmt
+                .query_map([episode_id], |row| {
+                    Ok(Bookmark {
+                        id: row.get(0)?,
+                        podcast_id: row.get(1)?,
+                        episode_id: row.get(2)?,
+                        position_seconds: row.get(3)?,
+                        note_text: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(rows)
+        })
+        .await?
+    }
+
+    /// Returns podcast-level notes (episode_id IS NULL) for a podcast.
+    pub async fn get_podcast_bookmarks(&self, podcast_id: i32) -> anyhow::Result<Vec<Bookmark>> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, podcast_id, episode_id, position_seconds, note_text,
+                        created_at, updated_at
+                 FROM bookmarks
+                 WHERE podcast_id = ?1 AND episode_id IS NULL
+                 ORDER BY created_at",
+            )?;
+
+            let rows = stmt
+                .query_map([podcast_id], |row| {
+                    Ok(Bookmark {
+                        id: row.get(0)?,
+                        podcast_id: row.get(1)?,
+                        episode_id: row.get(2)?,
+                        position_seconds: row.get(3)?,
+                        note_text: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(rows)
+        })
+        .await?
+    }
+
+    pub async fn insert_bookmark(&self, bookmark: Bookmark) -> anyhow::Result<Bookmark> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "INSERT INTO bookmarks
+                    (podcast_id, episode_id, position_seconds, note_text, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![
+                    bookmark.podcast_id,
+                    bookmark.episode_id,
+                    bookmark.position_seconds,
+                    bookmark.note_text,
+                    now,
+                ],
+            )?;
+            Ok(Bookmark {
+                id: conn.last_insert_rowid() as i32,
+                created_at: now,
+                updated_at: now,
+                ..bookmark
+            })
+        })
+        .await?
+    }
+
+    pub async fn update_bookmark(&self, id: i32, note_text: String) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "UPDATE bookmarks SET note_text = ?1, updated_at = ?2 WHERE id = ?3",
+                params![note_text, now, id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn delete_bookmark(&self, id: i32) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            conn.execute("DELETE FROM bookmarks WHERE id = ?1", [id])?;
             Ok(())
         })
         .await?

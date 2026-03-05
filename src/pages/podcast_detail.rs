@@ -271,6 +271,26 @@ impl PodcastDetailPage {
                                         egui::RichText::new(episode.format_publish_date())
                                             .color(text_color),
                                     );
+
+                                    ui.add_space(6.0);
+
+                                    // Notes button — opens the panel anchored to this episode.
+                                    let notes_btn = ui
+                                        .button(
+                                            egui::RichText::new(
+                                                egui_phosphor::regular::NOTE_PENCIL,
+                                            )
+                                            .size(15.0)
+                                            .color(egui::Color32::from_rgb(130, 130, 140)),
+                                        )
+                                        .on_hover_text("Notes");
+                                    if notes_btn.clicked() {
+                                        state.notes_open_request = Some((
+                                            ep_id,
+                                            episode.podcast_id,
+                                            episode.title.clone(),
+                                        ));
+                                    }
                                 },
                             );
                         });

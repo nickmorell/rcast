@@ -128,7 +128,9 @@ impl AudioPlayer {
     }
 
     pub fn seek(&self, position: Duration) {
+        println!("seek: Seeking to {:?}", position);
         if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
+            println!("seek: Attempting to seek to {:?}", position);
             player.try_seek(position).ok();
         }
     }

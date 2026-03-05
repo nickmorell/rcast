@@ -42,6 +42,15 @@ pub enum AppEvent {
     SettingsLoaded(Settings),
     SettingsSaved,
 
+    // ── Bookmarks ─────────────────────────────────────────────────────────────
+    BookmarksLoaded {
+        episode_bookmarks: Vec<crate::db::models::Bookmark>,
+        podcast_bookmarks: Vec<crate::db::models::Bookmark>,
+    },
+    BookmarkAdded(crate::db::models::Bookmark),
+    BookmarkUpdated(crate::db::models::Bookmark),
+    BookmarkDeleted(i32),
+
     // ── OPML ──────────────────────────────────────────────────────────────────
     /// Fired after an OPML import completes (successfully or partially).
     OpmlImported {

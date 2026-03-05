@@ -21,6 +21,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
         &versions::add_episode_position::AddEpisodePosition,
         &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+        &versions::create_bookmarks_table::CreateBookmarksTable,
     ];
 
     let mut names = HashSet::new();
@@ -54,6 +55,7 @@ pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
         &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
         &versions::add_episode_position::AddEpisodePosition,
         &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+        &versions::create_bookmarks_table::CreateBookmarksTable,
     ];
 
     let target_pos = migrations

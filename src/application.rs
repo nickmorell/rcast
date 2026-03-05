@@ -5,6 +5,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::audio_player::{AudioPlayer, PlaybackState};
 use crate::commands::AppCommand;
 use crate::components::add_podcast_modal::AddPodcastModal;
+use crate::components::notes_panel::NotesPanel;
 use crate::components::toast;
 use crate::events::AppEvent;
 use crate::pages::{home::HomePage, podcast_detail::PodcastDetailPage, settings::SettingsPage};
@@ -24,6 +25,9 @@ pub struct RCast {
     // ── Global modal — top-level so it works on any page ─────────────────────
     pub add_podcast_modal: AddPodcastModal,
 
+    // ── Notes panel — persists across pages, anchored to an episode ──────────
+    pub notes_panel: NotesPanel,
+
     // ── Page structs (hold only transient local UI state) ─────────────────────
     pub home_page: HomePage,
     pub podcast_detail_page: PodcastDetailPage,
@@ -33,7 +37,6 @@ pub struct RCast {
 impl RCast {
     pub fn new(
         cmd_tx: UnboundedSender<AppCommand>,
-
         event_rx: UnboundedReceiver<AppEvent>,
         audio_player: AudioPlayer,
         folder_picker: Arc<dyn FolderPicker>,
@@ -52,6 +55,7 @@ impl RCast {
             current_page: Page::Home,
             audio_player,
             add_podcast_modal: AddPodcastModal::new(),
+            notes_panel: NotesPanel::default(),
             home_page: HomePage::default(),
             podcast_detail_page: PodcastDetailPage::default(),
             settings_page,
@@ -165,6 +169,51 @@ impl RCast {
                     .push(toast::ToastMessage::success(&format!("Exported to {path}")));
             }
 
+            // ── Bookmarks ─────────────────────────────────────────────────────
+            AppEvent::BookmarksLoaded {
+                episode_bookmarks,
+                podcast_bookmarks,
+            } => {
+                self.state.notes_episode_bookmarks = episode_bookmarks;
+                self.state.notes_podcast_bookmarks = podcast_bookmarks;
+            }
+            AppEvent::BookmarkAdded(bookmark) => {
+                if bookmark.episode_id.is_some() {
+                    // Insert in sorted position: timed notes by position, then untimed
+                    let pos = self.state.notes_episode_bookmarks.iter().position(|b| {
+                        match (b.position_seconds, bookmark.position_seconds) {
+                            (Some(a), Some(bv)) => a > bv,
+                            (None, Some(_)) => true,
+                            _ => false,
+                        }
+                    });
+                    match pos {
+                        Some(i) => self.state.notes_episode_bookmarks.insert(i, bookmark),
+                        None => self.state.notes_episode_bookmarks.push(bookmark),
+                    }
+                } else {
+                    self.state.notes_podcast_bookmarks.push(bookmark);
+                }
+            }
+            AppEvent::BookmarkUpdated(updated) => {
+                // The orchestrator sends back just id + new text — patch in place.
+                for b in self
+                    .state
+                    .notes_episode_bookmarks
+                    .iter_mut()
+                    .chain(self.state.notes_podcast_bookmarks.iter_mut())
+                {
+                    if b.id == updated.id {
+                        b.note_text = updated.note_text.clone();
+                        break;
+                    }
+                }
+            }
+            AppEvent::BookmarkDeleted(id) => {
+                self.state.notes_episode_bookmarks.retain(|b| b.id != id);
+                self.state.notes_podcast_bookmarks.retain(|b| b.id != id);
+            }
+
             // ── Cross-cutting ─────────────────────────────────────────────────
             AppEvent::Toast(msg) => {
                 self.state.toasts.push(msg);
@@ -212,6 +261,21 @@ impl eframe::App for RCast {
             self.state.open_add_podcast_requested = false;
         }
 
+        // ── 1c. Handle notes panel open requests (from detail page or media controls)
+        if let Some((episode_id, podcast_id, title)) = self.state.notes_open_request.take() {
+            let changed = self.notes_panel.open(episode_id, podcast_id, title);
+            if changed {
+                // Clear stale bookmarks immediately so the panel shows a clean state
+                // while the fresh load is in flight.
+                self.state.notes_episode_bookmarks.clear();
+                self.state.notes_podcast_bookmarks.clear();
+                let _ = self.cmd_tx.send(AppCommand::LoadBookmarks {
+                    podcast_id,
+                    episode_id,
+                });
+            }
+        }
+
         // ── 2. Poll audio player for autoplay / stop detection ────────────────
         self.poll_audio();
 
@@ -225,7 +289,24 @@ impl eframe::App for RCast {
             self.add_podcast_modal.open();
         }
 
-        // ── 4. Active page ────────────────────────────────────────────────────
+        // ── 4. Notes panel (right SidePanel — must register before CentralPanel) ─
+        {
+            let now_playing_id = self.state.now_playing.as_ref().map(|np| np.episode_id);
+            let current_pos = self.audio_player.get_position().as_secs_f64();
+            self.notes_panel.render(
+                ctx,
+                &self.state.notes_episode_bookmarks,
+                &self.state.notes_podcast_bookmarks,
+                now_playing_id,
+                current_pos,
+                &self.cmd_tx,
+            );
+            if let Some(seek_to) = self.notes_panel.seek_request.take() {
+                self.audio_player.seek(seek_to);
+            }
+        }
+
+        // ── 5. Active page ────────────────────────────────────────────────────
         egui::CentralPanel::default().show(ctx, |ui| match self.current_page.clone() {
             Page::Home => {
                 self.home_page.render(ui, &mut self.state, &self.cmd_tx);
@@ -239,7 +320,7 @@ impl eframe::App for RCast {
             }
         });
 
-        // ── 5. Media controls (bottom panel) ─────────────────────────────────
+        // ── 6. Media controls (bottom panel) ─────────────────────────────────
         egui::TopBottomPanel::bottom("media_controls")
             .min_height(80.0)
             .show(ctx, |ui| {
@@ -291,9 +372,26 @@ impl eframe::App for RCast {
                     &mut volume,
                     &mut self.home_page.show_queue,
                     &mut self.home_page.show_speed_menu,
+                    self.notes_panel.visible,
                 );
 
                 match action {
+                    MediaControlsAction::ToggleNotes => {
+                        if self.notes_panel.visible {
+                            self.notes_panel.close();
+                        } else if let Some(np) = &self.state.now_playing {
+                            // Open panel for the currently playing episode.
+                            let title = self
+                                .state
+                                .detail_episodes
+                                .iter()
+                                .find(|e| e.id == np.episode_id)
+                                .map(|e| e.title.clone())
+                                .unwrap_or_default();
+                            self.state.notes_open_request =
+                                Some((np.episode_id, np.podcast_id, title));
+                        }
+                    }
                     MediaControlsAction::PlayPause => match self.audio_player.get_state() {
                         PlaybackState::Playing => self.audio_player.pause(),
                         PlaybackState::Paused => self.audio_player.resume(),
@@ -327,12 +425,12 @@ impl eframe::App for RCast {
                 ui.add_space(5.0);
             });
 
-        // ── 6. Add Podcast modal (global — works on any page) ─────────────────
+        // ── 7. Add Podcast modal (global — works on any page) ─────────────────
         if let Some(url) = self.add_podcast_modal.render(ctx) {
             let _ = self.cmd_tx.send(AppCommand::AddPodcast { feed_url: url });
         }
 
-        // ── 7. Toast overlay ──────────────────────────────────────────────────
+        // ── 8. Toast overlay ──────────────────────────────────────────────────
         toast::render(ctx, &mut self.state.toasts);
     }
 }

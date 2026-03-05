@@ -1,4 +1,5 @@
 use crate::components::toast::ToastQueue;
+use crate::db::models::Bookmark;
 use crate::db::models::{Episode, Podcast};
 use crate::image_cache::ImageCache;
 use crate::types::{QueueDisplayItem, Settings};
@@ -36,6 +37,15 @@ pub struct AppState {
     // ── Images ────────────────────────────────────────────────────────────────
     pub image_cache: ImageCache,
 
+    // ── Bookmarks ─────────────────────────────────────────────────────────────
+    /// Episode-level bookmarks (timed + general) for the currently open panel.
+    pub notes_episode_bookmarks: Vec<Bookmark>,
+    /// Podcast-level notes for the currently open panel.
+    pub notes_podcast_bookmarks: Vec<Bookmark>,
+    /// Set by podcast_detail / media_controls to request the panel open.
+    /// Tuple: (episode_id, podcast_id, episode_title)
+    pub notes_open_request: Option<(i32, i32, String)>,
+
     // ── Sync status ───────────────────────────────────────────────────────────
     /// IDs of podcasts currently being synced — used to show spinners on cards.
     pub syncing_podcast_ids: HashSet<i32>,
@@ -47,6 +57,9 @@ pub struct AppState {
     /// Set to true by any page that wants the Add Podcast modal to open.
     /// Consumed (and reset) by application.rs at the top of each frame.
     pub open_add_podcast_requested: bool,
+    /// Set by the notes panel when a timestamp badge is clicked.
+    /// Consumed by application.rs which calls audio_player.seek().
+    pub seek_request: Option<std::time::Duration>,
 }
 
 impl Default for AppState {
@@ -59,9 +72,13 @@ impl Default for AppState {
             queue_display: Vec::new(),
             settings: Settings::default(),
             image_cache: ImageCache::new(),
+            notes_episode_bookmarks: Vec::new(),
+            notes_podcast_bookmarks: Vec::new(),
+            notes_open_request: None,
             syncing_podcast_ids: HashSet::new(),
             toasts: ToastQueue::default(),
             open_add_podcast_requested: false,
+            seek_request: None,
         }
     }
 }

@@ -26,6 +26,7 @@ impl MediaControls {
         volume: &mut f32,
         show_queue: &mut bool,
         show_speed_menu: &mut bool,
+        notes_open: bool,
     ) -> MediaControlsAction {
         let mut action = MediaControlsAction::None;
 
@@ -238,6 +239,22 @@ impl MediaControls {
                         *show_queue = !*show_queue;
                     }
 
+                    ui.add_space(5.0);
+
+                    // Notes button — highlighted when the panel is open
+                    let notes_icon = egui::RichText::new(egui_phosphor::regular::NOTE_PENCIL)
+                        .size(20.0)
+                        .color(if notes_open {
+                            egui::Color32::from_rgb(140, 180, 255)
+                        } else {
+                            ui.visuals().text_color()
+                        });
+                    let notes_btn = ui.button(notes_icon)
+                        .on_hover_text(if notes_open { "Close notes" } else { "Open notes" });
+                    if notes_btn.clicked() {
+                        action = MediaControlsAction::ToggleNotes;
+                    }
+
                     if *show_queue {
                         let area_response =
                             egui::Area::new(egui::Id::new("queue_menu"))
@@ -369,4 +386,5 @@ pub enum MediaControlsAction {
     VolumeChanged(f32),
     SetSpeed(f32),
     RemoveFromQueue(i32),
+    ToggleNotes,
 }

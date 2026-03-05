@@ -29,6 +29,23 @@ pub struct Episode {
     pub updated_at: i64,
 }
 
+/// A user-created note, optionally tied to a timestamp.
+///
+/// Three natural types emerge from the data:
+/// - Podcast-level note: `episode_id` is None, `position_seconds` is None
+/// - Timed episode note: `episode_id` is Some, `position_seconds` is Some
+/// - General episode note: `episode_id` is Some, `position_seconds` is None
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub id: i32,
+    pub podcast_id: i32,
+    pub episode_id: Option<i32>,
+    pub position_seconds: Option<f64>,
+    pub note_text: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 impl Episode {
     pub fn format_publish_date(&self) -> String {
         let now = chrono::Utc::now().timestamp();

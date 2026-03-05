@@ -29,6 +29,25 @@ pub enum AppCommand {
     AddToQueue(i32),
     RemoveFromQueue(i32),
 
+    // ── Bookmarks ─────────────────────────────────────────────────────────────
+    /// Load bookmarks for a given episode + podcast-level notes.
+    /// Fired when the notes panel opens.
+    LoadBookmarks {
+        podcast_id: i32,
+        episode_id: i32,
+    },
+    AddBookmark {
+        podcast_id: i32,
+        episode_id: Option<i32>,
+        position_seconds: Option<f64>,
+        note_text: String,
+    },
+    UpdateBookmark {
+        id: i32,
+        note_text: String,
+    },
+    DeleteBookmark(i32),
+
     // ── OPML ──────────────────────────────────────────────────────────────────
     /// Import subscriptions from an OPML file at the given path.
     ImportOpml {

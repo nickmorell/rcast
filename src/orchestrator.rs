@@ -326,6 +326,93 @@ impl Orchestrator {
                 }
             }
 
+            // ── Bookmarks ─────────────────────────────────────────────────────
+            AppCommand::LoadBookmarks {
+                podcast_id,
+                episode_id,
+            } => {
+                let db = self.db.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let episode_bookmarks = db
+                        .get_bookmarks_for_episode(episode_id)
+                        .await
+                        .unwrap_or_default();
+                    let podcast_bookmarks = db
+                        .get_podcast_bookmarks(podcast_id)
+                        .await
+                        .unwrap_or_default();
+                    let _ = tx.send(AppEvent::BookmarksLoaded {
+                        episode_bookmarks,
+                        podcast_bookmarks,
+                    });
+                });
+            }
+            AppCommand::AddBookmark {
+                podcast_id,
+                episode_id,
+                position_seconds,
+                note_text,
+            } => {
+                let db = self.db.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let bookmark = crate::db::models::Bookmark {
+                        id: 0,
+                        podcast_id,
+                        episode_id,
+                        position_seconds,
+                        note_text,
+                        created_at: 0,
+                        updated_at: 0,
+                    };
+                    match db.insert_bookmark(bookmark).await {
+                        Ok(saved) => {
+                            let _ = tx.send(AppEvent::BookmarkAdded(saved));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::Error(format!("Failed to save note: {e}")));
+                        }
+                    }
+                });
+            }
+            AppCommand::UpdateBookmark { id, note_text } => {
+                let db = self.db.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    match db.update_bookmark(id, note_text.clone()).await {
+                        Ok(_) => {
+                            let _ =
+                                tx.send(AppEvent::BookmarkUpdated(crate::db::models::Bookmark {
+                                    id,
+                                    podcast_id: 0,
+                                    episode_id: None,
+                                    position_seconds: None,
+                                    note_text,
+                                    created_at: 0,
+                                    updated_at: 0,
+                                }));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::Error(format!("Failed to update note: {e}")));
+                        }
+                    }
+                });
+            }
+            AppCommand::DeleteBookmark(id) => {
+                let db = self.db.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    match db.delete_bookmark(id).await {
+                        Ok(_) => {
+                            let _ = tx.send(AppEvent::BookmarkDeleted(id));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::Error(format!("Failed to delete note: {e}")));
+                        }
+                    }
+                });
+            }
             // ── Settings ─────────────────────────────────────────────────────
             AppCommand::ImportOpml { path } => {
                 let tx = self.event_tx.clone();
