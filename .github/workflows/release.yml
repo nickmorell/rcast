@@ -1,85 +1,188 @@
-name: Build and Release
+name: Release
 
 on:
-  push:
+  # Validate version on release branch PRs
+  pull_request:
     branches:
       - main
-      - master
+    paths:
+      - 'Cargo.toml'
 
-env:
-  APP_NAME: rcast
+  # Build and draft a release when a version tag is pushed (admins only)
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  build:
-    name: Build and Test
+  # ── Semver validation (release/v* PRs only) ───────────────────────────────────
+  validate-version:
+    name: Validate version
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      startsWith(github.head_ref, 'release/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: cargo_version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Cargo.toml version: $VERSION"
+
+      - name: Validate semver format
+        run: |
+          VERSION="${{ steps.cargo_version.outputs.version }}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ '$VERSION' is not valid semver. Expected MAJOR.MINOR.PATCH (e.g. 0.2.0)"
+            exit 1
+          fi
+          echo "✅ Version format valid: $VERSION"
+
+      - name: Check version is higher than last release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEW="${{ steps.cargo_version.outputs.version }}"
+          LATEST=$(gh release list --repo ${{ github.repository }} --limit 1 \
+            --json tagName --jq '.[0].tagName // ""')
+
+          if [ -z "$LATEST" ]; then
+            echo "ℹ️  No existing releases found — any version is acceptable."
+            exit 0
+          fi
+
+          LATEST_VER="${LATEST#v}"
+          echo "Last release: $LATEST_VER  →  New: $NEW"
+
+          HIGHER=$(printf '%s\n%s' "$LATEST_VER" "$NEW" | sort -V | tail -1)
+          if [ "$HIGHER" != "$NEW" ] || [ "$NEW" = "$LATEST_VER" ]; then
+            echo "❌ $NEW is not strictly higher than the last release ($LATEST_VER)."
+            exit 1
+          fi
+          echo "✅ $NEW is higher than $LATEST_VER"
+
+      - name: Validate branch name matches version
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          VERSION="${{ steps.cargo_version.outputs.version }}"
+          EXPECTED="release/v${VERSION}"
+          if [ "$BRANCH" != "$EXPECTED" ]; then
+            echo "❌ Branch '$BRANCH' does not match version $VERSION."
+            echo "Expected branch name: $EXPECTED"
+            exit 1
+          fi
+          echo "✅ Branch name matches version"
+
+  # ── Build release binaries (tag push only) ────────────────────────────────────
+  build-release:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     strategy:
+      fail-fast: false
       matrix:
-        BUILD_TARGET: [ release ]
+        include:
+          - name: Windows
+            os: windows-latest
+            artifact: rcast-windows.exe
+
+          - name: macOS
+            os: macos-latest
+            artifact: rcast-macos
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Cache Cargo registry, git deps, and the build target dir to speed up builds
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Install ALSA system dependency
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Build in ${{ matrix.BUILD_TARGET }} mode
-        run: cargo build --profile ${{ matrix.BUILD_TARGET }}
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          cp target/x86_64-pc-windows-msvc/release/rcast.exe rcast-windows.exe
 
-      - name: Run tests in ${{ matrix.BUILD_TARGET }} mode
-        run: cargo test --profile ${{ matrix.BUILD_TARGET }}
+      - name: Build universal binary (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create \
+            target/aarch64-apple-darwin/release/rcast \
+            target/x86_64-apple-darwin/release/rcast \
+            -output rcast-macos
 
-      # Upload the compiled binary as an artifact so the release job can use it
-      - name: Upload release artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}
-          path: target/${{ matrix.BUILD_TARGET }}/${{ env.APP_NAME }}
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
 
-  release:
-    name: Publish GitHub Release
-    # Only run the release job on direct pushes to main/master (i.e. merged PRs), not on PRs themselves
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    needs: build # Wait for the build job to succeed first
+  # ── Create draft release (after both builds succeed) ─────────────────────────
+  draft-release:
+    name: Create draft release
     runs-on: ubuntu-latest
-
+    needs: build-release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
-      contents: write # Required to create a GitHub release
+      contents: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Download the binary that was uploaded by the build job
-      - name: Download release artifact
+      - name: Verify tag matches Cargo.toml
+        run: |
+          TAG_VER="${{ github.ref_name }}"
+          TAG_VER="${TAG_VER#v}"
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$TAG_VER" != "$CARGO_VER" ]; then
+            echo "❌ Tag ($TAG_VER) does not match Cargo.toml ($CARGO_VER)"
+            exit 1
+          fi
+          echo "✅ Tag matches Cargo.toml: $TAG_VER"
+
+      - name: Download Windows binary
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}
-          path: ./${{ env.APP_NAME }}
+          name: rcast-windows.exe
 
-      # Make the binary executable before attaching it to the release
-      - name: Make binary executable
-        run: chmod +x ./${{ env.APP_NAME }}/${{ env.APP_NAME }}
+      - name: Download macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: rcast-macos
 
-      # Creates a GitHub release using the short commit SHA as the release name
-      # The binary is attached directly to the release as a downloadable asset
-      - name: Publish release to GitHub
-        run: |
-          gh release create "${{ github.sha }}" \
-            --title "Release ${{ github.sha }}" \
-            --generate-notes \
-            ./${{ env.APP_NAME }}/${{ env.APP_NAME }}#${{ env.APP_NAME }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: RCast ${{ github.ref_name }}
+          body: |
+            ## What's new
+
+            <!-- Add release notes here before publishing -->
+
+            ---
+
+            ## Installation
+
+            | Platform | File |
+            |----------|------|
+            | Windows | `rcast-windows.exe` |
+            | macOS (Intel + Apple Silicon) | `rcast-macos` |
+
+            **macOS:** On first launch you may need to right-click → Open to bypass Gatekeeper.
+          files: |
+            rcast-windows.exe
+            rcast-macos
