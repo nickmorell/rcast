@@ -9,14 +9,9 @@ use rusqlite::{Connection, params};
 
 use crate::errors::DatabaseError;
 use crate::migrations::run_migrations;
-use crate::types::{QueueDisplayItem, QueueItem, Settings};
+use crate::types::{HomeDensity, QueueDisplayItem, QueueItem, Settings};
 use models::{Bookmark, Episode, Podcast};
 
-/// Thin wrapper around a rusqlite connection pool.
-///
-/// rusqlite is synchronous so every public async method wraps its work in
-/// `tokio::task::spawn_blocking`.  The `Arc<Mutex<Connection>>` makes the
-/// handle cheap to clone and safe to share across spawned tasks.
 #[derive(Clone)]
 pub struct Database {
     connection: Arc<Mutex<Connection>>,
@@ -40,7 +35,7 @@ impl Database {
         })
     }
 
-    // ── Podcasts ──────────────────────────────────────────────────────────────
+    // Podcasts
 
     pub async fn get_all_podcasts(&self) -> anyhow::Result<Vec<Podcast>> {
         let conn = self.connection.clone();
@@ -138,7 +133,7 @@ impl Database {
         .await?
     }
 
-    /// Stamps `last_synced_at` with the current time after a successful sync.
+    // Stamps `last_synced_at` with the current time after a successful sync.
     pub async fn update_podcast_synced_at(&self, podcast_id: i32) -> anyhow::Result<()> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -163,7 +158,7 @@ impl Database {
         .await?
     }
 
-    // ── Episodes ──────────────────────────────────────────────────────────────
+    // Episodes
 
     pub async fn get_episodes(&self, podcast_id: i32) -> anyhow::Result<Vec<Episode>> {
         let conn = self.connection.clone();
@@ -287,9 +282,11 @@ impl Database {
         .await?
     }
 
-    /// Saves the current playback position for an episode. Called periodically
-    /// while playing and on pause. Only writes if the position has changed by
-    /// more than 5 seconds to avoid unnecessary DB churn.
+    /**
+        Saves the current playback position for an episode. Called periodically
+        while playing and on pause. Only writes if the position has changed by
+        more than 5 seconds to avoid unnecessary DB churn.
+    */
     pub async fn update_episode_position(
         &self,
         episode_id: i32,
@@ -308,8 +305,10 @@ impl Database {
         .await?
     }
 
-    /// Marks an episode as fully played and resets its saved position to zero.
-    /// Called when an episode finishes naturally (end of track or autoplay kicks in).
+    /**
+        Marks an episode as fully played and resets its saved position to zero.
+        Called when an episode finishes naturally (end of track or autoplay kicks in).
+    */
     pub async fn complete_episode(&self, episode_id: i32) -> anyhow::Result<()> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -326,10 +325,12 @@ impl Database {
         .await?
     }
 
-    // ── Bookmarks ─────────────────────────────────────────────────────────────
+    // Bookmarks
 
-    /// Returns all bookmarks for a specific episode, ordered by position then
-    /// creation time. Includes both timed and untimed episode notes.
+    /**
+        Returns all bookmarks for a specific episode, ordered by position then
+        creation time. Includes both timed and untimed episode notes.
+    */
     pub async fn get_bookmarks_for_episode(
         &self,
         episode_id: i32,
@@ -364,7 +365,7 @@ impl Database {
         .await?
     }
 
-    /// Returns podcast-level notes (episode_id IS NULL) for a podcast.
+    // Returns podcast-level notes (episode_id IS NULL) for a podcast.
     pub async fn get_podcast_bookmarks(&self, podcast_id: i32) -> anyhow::Result<Vec<Bookmark>> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -447,7 +448,7 @@ impl Database {
         .await?
     }
 
-    // ── Queue ─────────────────────────────────────────────────────────────────
+    // Queue
 
     pub async fn get_queue(&self) -> anyhow::Result<Vec<QueueItem>> {
         let conn = self.connection.clone();
@@ -473,7 +474,7 @@ impl Database {
         .await?
     }
 
-    /// Returns queue items with denormalised episode and podcast titles for display.
+    // Returns queue items with denormalised episode and podcast titles for display.
     pub async fn get_queue_with_details(&self) -> anyhow::Result<Vec<QueueDisplayItem>> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -532,7 +533,7 @@ impl Database {
         .await?
     }
 
-    // ── Settings ─────────────────────────────────────────────────────────────
+    // Settings
 
     pub async fn get_settings(&self) -> anyhow::Result<Settings> {
         let conn = self.connection.clone();
@@ -559,6 +560,12 @@ impl Database {
                     }
                     "auto_play_next" => settings.auto_play_next = row.1 == "true",
                     "download_directory" => settings.download_directory = row.1,
+                    "home_density" => {
+                        settings.home_density = match row.1.as_str() {
+                            "list" => HomeDensity::List,
+                            _ => HomeDensity::Grid,
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -589,6 +596,13 @@ impl Database {
                 ),
                 ("auto_play_next", settings.auto_play_next.to_string()),
                 ("download_directory", settings.download_directory.clone()),
+                (
+                    "home_density",
+                    match settings.home_density {
+                        HomeDensity::Grid => "grid".to_string(),
+                        HomeDensity::List => "list".to_string(),
+                    },
+                ),
             ];
 
             for (key, value) in rows {
@@ -624,10 +638,7 @@ impl Database {
     }
 }
 
-// ── Allow DownloadManager (sync) to call get_download_directory synchronously ─
-
 impl Database {
-    /// Synchronous variant used by DownloadManager (which is not async).
     pub fn get_download_directory_sync(&self) -> Result<String, DatabaseError> {
         let conn = self
             .connection

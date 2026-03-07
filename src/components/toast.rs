@@ -61,8 +61,7 @@ impl ToastQueue {
     }
 }
 
-/// Renders active toasts in the bottom-right corner and removes expired ones.
-/// Call once per frame from `App::update`, after all panels.
+// Renders active toasts in the bottom-right corner and removes expired ones.
 pub fn render(ctx: &Context, queue: &mut ToastQueue) {
     queue.toasts.retain(|t| !t.is_expired());
 

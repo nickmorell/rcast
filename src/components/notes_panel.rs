@@ -5,7 +5,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::commands::AppCommand;
 use crate::db::models::Bookmark;
 
-// ── Colour palette ────────────────────────────────────────────────────────────
+// Colour palette
 
 const BG: Color32 = Color32::from_rgb(22, 22, 26);
 const SURFACE: Color32 = Color32::from_rgb(32, 32, 38);
@@ -17,25 +17,19 @@ const PODCAST_NOTE_BG: Color32 = Color32::from_rgb(40, 38, 60);
 const DELETE_RED: Color32 = Color32::from_rgb(200, 70, 70);
 const CONFIRM_BG: Color32 = Color32::from_rgb(55, 30, 30);
 
-/// The local state the panel owns across frames.
 pub struct NotesPanel {
-    /// Which episode this panel was opened for.
     pub episode_id: Option<i32>,
     pub podcast_id: Option<i32>,
     pub episode_title: String,
 
-    /// Text currently in the new-note input box.
     pub input_text: String,
 
-    /// Which bookmark (if any) is currently being edited inline.
     edit_id: Option<i32>,
     edit_text: String,
 
-    /// Which bookmark is showing its inline delete confirmation.
     delete_confirm_id: Option<i32>,
 
     pub visible: bool,
-    /// Set when a timestamp badge is clicked; consumed by application.rs.
     pub seek_request: Option<Duration>,
 }
 
@@ -56,8 +50,6 @@ impl Default for NotesPanel {
 }
 
 impl NotesPanel {
-    /// Open the panel for a specific episode.
-    /// Returns true if the episode changed (caller should fire LoadBookmarks).
     pub fn open(&mut self, episode_id: i32, podcast_id: i32, title: String) -> bool {
         let changed = self.episode_id != Some(episode_id);
         self.episode_id = Some(episode_id);
@@ -107,7 +99,7 @@ impl NotesPanel {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
 
-                // ── Header ────────────────────────────────────────────────────
+                // Header
                 egui::Frame::new()
                     .fill(SURFACE)
                     .inner_margin(egui::Margin::symmetric(14, 12))
@@ -159,7 +151,7 @@ impl NotesPanel {
                         ui.set_width(ui.available_width());
                         ui.spacing_mut().item_spacing.y = 0.0;
 
-                        // ── New note input ────────────────────────────────────
+                        // New note input
                         egui::Frame::new()
                             .fill(SURFACE)
                             .inner_margin(egui::Margin::symmetric(14, 10))
@@ -211,7 +203,7 @@ impl NotesPanel {
 
                         ui.add_space(8.0);
 
-                        // ── Podcast-level notes ───────────────────────────────
+                        // Podcast-level notes
                         if !podcast_bookmarks.is_empty() {
                             section_label(ui, "PODCAST");
                             for b in podcast_bookmarks {
@@ -220,7 +212,7 @@ impl NotesPanel {
                             ui.add_space(8.0);
                         }
 
-                        // ── Timed episode notes ───────────────────────────────
+                        // Timed episode notes
                         let timed: Vec<&Bookmark> = episode_bookmarks
                             .iter()
                             .filter(|b| b.position_seconds.is_some())
@@ -238,7 +230,7 @@ impl NotesPanel {
                             ui.add_space(8.0);
                         }
 
-                        // ── General episode notes ─────────────────────────────
+                        // General episode notes
                         if !untimed.is_empty() {
                             section_label(ui, "GENERAL");
                             for b in &untimed {
@@ -246,7 +238,7 @@ impl NotesPanel {
                             }
                         }
 
-                        // ── Empty state ───────────────────────────────────────
+                        // Empty state
                         if podcast_bookmarks.is_empty() && episode_bookmarks.is_empty() {
                             ui.add_space(32.0);
                             ui.vertical_centered(|ui| {
@@ -301,7 +293,7 @@ impl NotesPanel {
                 ui.set_width(ui.available_width());
 
                 if is_confirming_delete {
-                    // ── Inline delete confirmation ─────────────────────────────
+                    // Inline delete confirmation
                     egui::Frame::new()
                         .fill(CONFIRM_BG)
                         .corner_radius(6)
@@ -336,7 +328,7 @@ impl NotesPanel {
                             });
                         });
                 } else if is_editing {
-                    // ── Inline edit mode ──────────────────────────────────────
+                    // Inline edit mode
                     if self.edit_id == Some(id) && self.edit_text.is_empty() {
                         self.edit_text = bookmark.note_text.clone();
                     }
@@ -388,7 +380,7 @@ impl NotesPanel {
                         }
                     });
                 } else {
-                    // ── Normal read mode ──────────────────────────────────────
+                    // Normal read mode
                     // Timestamp badge — clicking seeks to that position
                     if show_timestamp {
                         if let Some(pos) = bookmark.position_seconds {
@@ -403,9 +395,6 @@ impl NotesPanel {
                     }
 
                     ui.horizontal(|ui| {
-                        // ui.ui_contains_pointer() is true when the cursor is inside
-                        // this frame's area — avoids the giant-rect bug from
-                        // ui.interact(available_rect_before_wrap()).
                         let currently_hovered = ui.ui_contains_pointer();
 
                         ui.label(
@@ -476,7 +465,7 @@ impl NotesPanel {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Helpers
 
 fn section_label(ui: &mut Ui, text: &str) {
     egui::Frame::new()

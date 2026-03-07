@@ -11,7 +11,7 @@ use crate::db::Database;
 use crate::db::models::{Episode, Podcast};
 use crate::download_manager::DownloadManager;
 use crate::events::AppEvent;
-use crate::types::{Page, Settings};
+use crate::types::Page;
 
 pub struct Orchestrator {
     cmd_rx: UnboundedReceiver<AppCommand>,
@@ -20,11 +20,8 @@ pub struct Orchestrator {
     audio_player: AudioPlayer,
     audio_cache: AudioCache,
     download_manager: DownloadManager,
-    /// Tracks which podcast detail page is open so TogglePlayed can refresh it.
     current_detail_podcast_id: Option<i32>,
-    /// Prevents duplicate autoplay triggers for the same finished episode.
     last_finished_episode_id: Option<i32>,
-    /// Last position (seconds) written to the DB — avoids thrashing on every tick.
     last_saved_position: f64,
 }
 
@@ -59,7 +56,6 @@ impl Orchestrator {
         // Initial podcast load (home page).
         self.load_all_podcasts().await;
 
-        // Periodic background sync task.
         {
             let tx = self.event_tx.clone();
             let db = self.db.clone();
@@ -75,7 +71,6 @@ impl Orchestrator {
             });
         }
 
-        // Initial one-off sync.
         {
             let tx = self.event_tx.clone();
             let db = self.db.clone();
@@ -99,8 +94,6 @@ impl Orchestrator {
         }
     }
 
-    /// Writes the current playback position to the DB if audio is playing and
-    /// the position has moved more than 5 seconds since the last save.
     async fn auto_save_position(&mut self) {
         use crate::audio_player::PlaybackState;
 
@@ -131,7 +124,7 @@ impl Orchestrator {
 
     async fn handle(&mut self, cmd: AppCommand) {
         match cmd {
-            // ── Navigation ────────────────────────────────────────────────────
+            // Navigation
             AppCommand::NavigateTo(page) => {
                 let _ = self.event_tx.send(AppEvent::NavigatedTo(page.clone()));
 
@@ -157,7 +150,7 @@ impl Orchestrator {
                 }
             }
 
-            // ── Podcasts ──────────────────────────────────────────────────────
+            // Podcasts
             AppCommand::AddPodcast { feed_url } => {
                 let tx = self.event_tx.clone();
                 let db = self.db.clone();
@@ -193,7 +186,7 @@ impl Orchestrator {
                 });
             }
 
-            // ── Playback ──────────────────────────────────────────────────────
+            // Playback
             AppCommand::PlayEpisode(episode_id) => {
                 self.play_episode(episode_id).await;
             }
@@ -248,7 +241,7 @@ impl Orchestrator {
                 }
             }
 
-            // ── Queue ─────────────────────────────────────────────────────────
+            // Queue
             AppCommand::AddToQueue(id) => {
                 self.db.add_to_queue(id).await.ok();
                 self.refresh_queue_display().await;
@@ -258,7 +251,7 @@ impl Orchestrator {
                 self.refresh_queue_display().await;
             }
 
-            // ── Episodes ──────────────────────────────────────────────────────
+            // Episodes
             AppCommand::DownloadEpisode(episode_id) => {
                 let episode = match self.db.get_episode(episode_id).await {
                     Ok(Some(e)) => e,
@@ -326,7 +319,7 @@ impl Orchestrator {
                 }
             }
 
-            // ── Bookmarks ─────────────────────────────────────────────────────
+            // Bookmarks
             AppCommand::LoadBookmarks {
                 podcast_id,
                 episode_id,
@@ -413,7 +406,7 @@ impl Orchestrator {
                     }
                 });
             }
-            // ── Settings ─────────────────────────────────────────────────────
+            // Settings
             AppCommand::ImportOpml { path } => {
                 let tx = self.event_tx.clone();
                 let db = self.db.clone();
@@ -444,7 +437,7 @@ impl Orchestrator {
         }
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // Private helpers
 
     async fn load_all_podcasts(&self) {
         match self.db.get_all_podcasts().await {
@@ -516,13 +509,11 @@ impl Orchestrator {
         let audio_player = self.audio_player.clone();
         let tx = self.event_tx.clone();
 
-        // Reset the saved-position tracker for this new episode.
         self.last_saved_position = resume_position;
 
-        // Helper: if there's a saved position > 5s, seek and notify the user.
         let should_resume = resume_position > 5.0;
 
-        // ── Tier 1: user-downloaded file ──────────────────────────────────────
+        // Tier 1: user-downloaded file
         let downloaded_path = self
             .download_manager
             .find_file(vec![podcast.title.clone()], &episode.title);
@@ -554,7 +545,7 @@ impl Orchestrator {
             return;
         }
 
-        // ── Tier 2: in-memory audio cache ─────────────────────────────────────
+        // in-memory audio cache
         if let Some(bytes) = self.audio_cache.get(episode_id) {
             tokio::task::spawn_blocking(move || {
                 match audio_player.play_from_memory(bytes, episode_id) {
@@ -581,7 +572,7 @@ impl Orchestrator {
             return;
         }
 
-        // ── Tier 3: fetch from network, cache, then play ──────────────────────
+        // fetch from network, cache, then play
         let url = episode.url.clone();
         let _ = tx.send(AppEvent::Toast(ToastMessage::info("Buffering...")));
 
@@ -641,8 +632,6 @@ impl Orchestrator {
         }
     }
 }
-
-// ── Standalone async task functions ───────────────────────────────────────────
 
 async fn add_podcast(feed_url: String, db: Database, tx: UnboundedSender<AppEvent>) {
     let _ = tx.send(AppEvent::Toast(ToastMessage::info("Fetching feed...")));
@@ -748,7 +737,7 @@ async fn background_sync(db: Database, tx: UnboundedSender<AppEvent>) {
     }
 }
 
-/// Parses an RSS feed URL and returns (title, description, image_url, episodes).
+// Parses an RSS feed URL and returns (title, description, image_url, episodes).
 async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Episode>)> {
     let body = reqwest::get(url).await?.text().await?;
     let channel = rss::Channel::read_from(body.as_bytes())?;
@@ -815,13 +804,7 @@ async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Ep
     Ok((title, description, image_url, episodes))
 }
 
-// ── OPML import ───────────────────────────────────────────────────────────────
-
-/// Reads an OPML file, extracts every `xmlUrl` attribute, and subscribes to
-/// each feed that isn't already in the database.
-///
-/// Reports `added` / `skipped` (already subscribed) / `failed` (fetch error)
-/// counts via `AppEvent::OpmlImported`.
+// OPML import
 async fn import_opml(path: std::path::PathBuf, db: Database, tx: UnboundedSender<AppEvent>) {
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
@@ -910,8 +893,6 @@ async fn import_opml(path: std::path::PathBuf, db: Database, tx: UnboundedSender
     });
 }
 
-/// Extracts all `xmlUrl` attribute values from an OPML document.
-/// Permissive — does not require `type="rss"`, just looks for `xmlUrl`.
 fn parse_opml_feed_urls(opml: &str) -> Vec<String> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
@@ -960,10 +941,7 @@ fn parse_opml_feed_urls(opml: &str) -> Vec<String> {
     urls
 }
 
-// ── OPML export ───────────────────────────────────────────────────────────────
-
-/// Reads all podcasts from the DB and writes a valid OPML 2.0 file to `path`.
-/// Uses `xmlUrl` only — no `htmlUrl` since we store RSS feeds, not website URLs.
+// OPML export
 async fn export_opml(path: std::path::PathBuf, db: Database, tx: UnboundedSender<AppEvent>) {
     let podcasts = match db.get_all_podcasts().await {
         Ok(p) => p,
@@ -993,7 +971,7 @@ async fn export_opml(path: std::path::PathBuf, db: Database, tx: UnboundedSender
     }
 }
 
-/// Generates a well-formed OPML 2.0 document from a list of podcasts.
+// Generates a well-formed OPML 2.0 document from a list of podcasts.
 fn build_opml(podcasts: &[crate::db::models::Podcast]) -> String {
     let mut lines = vec![
         r#"<?xml version="1.0" encoding="utf-8"?>"#.to_string(),
@@ -1023,7 +1001,7 @@ fn build_opml(podcasts: &[crate::db::models::Podcast]) -> String {
     lines.join("\n")
 }
 
-/// Escapes the five XML special characters for use in attribute values.
+// Escapes the five XML special characters for use in attribute values.
 fn escape_xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('"', "&quot;")

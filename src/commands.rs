@@ -1,12 +1,12 @@
 use crate::types::{Page, Settings};
 
-/// Every action the UI can request. The Orchestrator is the sole consumer.
+// Every action the UI can request. The Orchestrator is the sole consumer.
 #[derive(Debug)]
 pub enum AppCommand {
-    // ── Navigation ────────────────────────────────────────────────────────────
+    // -- Navigation ------------------------------------------------------------
     NavigateTo(Page),
 
-    // ── Podcasts ──────────────────────────────────────────────────────────────
+    // -- Podcasts --------------------------------------------------------------
     AddPodcast {
         feed_url: String,
     },
@@ -14,24 +14,22 @@ pub enum AppCommand {
     SyncPodcast(i32),
     SyncAll,
 
-    // ── Episodes ──────────────────────────────────────────────────────────────
+    // -- Episodes --------------------------------------------------------------
     DownloadEpisode(i32),
     TogglePlayed(i32),
 
-    // ── Playback ──────────────────────────────────────────────────────────────
+    // -- Playback --------------------------------------------------------------
     PlayEpisode(i32),
     PlayAll(Vec<i32>),
     PlayNextInQueue,
     PausePlayback,
     ResumePlayback,
 
-    // ── Queue ─────────────────────────────────────────────────────────────────
+    // -- Queue -----------------------------------------------------------------
     AddToQueue(i32),
     RemoveFromQueue(i32),
 
-    // ── Bookmarks ─────────────────────────────────────────────────────────────
-    /// Load bookmarks for a given episode + podcast-level notes.
-    /// Fired when the notes panel opens.
+    // -- Bookmarks -------------------------------------------------------------
     LoadBookmarks {
         podcast_id: i32,
         episode_id: i32,
@@ -48,16 +46,16 @@ pub enum AppCommand {
     },
     DeleteBookmark(i32),
 
-    // ── OPML ──────────────────────────────────────────────────────────────────
-    /// Import subscriptions from an OPML file at the given path.
+    // -- OPML ------------------------------------------------------------------
+    // Import subscriptions from an OPML file at the given path.
     ImportOpml {
         path: std::path::PathBuf,
     },
-    /// Export all subscriptions to an OPML file at the given path.
+    // Export all subscriptions to an OPML file at the given path.
     ExportOpml {
         path: std::path::PathBuf,
     },
 
-    // ── Settings ─────────────────────────────────────────────────────────────
+    // -- Settings -------------------------------------------------------------
     SaveSettings(Settings),
 }

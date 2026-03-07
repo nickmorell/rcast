@@ -5,7 +5,7 @@ use crate::commands::AppCommand;
 use crate::state::AppState;
 use crate::types::Page;
 
-/// Returns `true` if the user clicked "Add Podcast" this frame.
+// Returns `true` if the user clicked "Add Podcast" this frame.
 pub fn render(ctx: &Context, state: &AppState, cmd_tx: &UnboundedSender<AppCommand>) -> bool {
     let mut open_add_podcast = false;
 

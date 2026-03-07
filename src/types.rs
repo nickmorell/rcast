@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-// ── Navigation ────────────────────────────────────────────────────────────────
+// Navigation
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Page {
@@ -9,7 +9,7 @@ pub enum Page {
     Settings,
 }
 
-// ── Sort order (used by both home and detail pages) ───────────────────────────
+// Sort order
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SortOrder {
@@ -19,7 +19,15 @@ pub enum SortOrder {
     PublishDateDesc,
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────────
+// Home density
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum HomeDensity {
+    Grid,
+    List,
+}
+
+// Settings
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -29,6 +37,7 @@ pub struct Settings {
     pub sync_interval_minutes: i32,
     pub auto_play_next: bool,
     pub download_directory: String,
+    pub home_density: HomeDensity,
 }
 
 impl Default for Settings {
@@ -44,11 +53,12 @@ impl Default for Settings {
                 .to_str()
                 .unwrap()
                 .to_string(),
+            home_density: HomeDensity::Grid,
         }
     }
 }
 
-// ── Queue ─────────────────────────────────────────────────────────────────────
+// Queue
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
@@ -58,9 +68,6 @@ pub struct QueueItem {
     pub created_at: i64,
 }
 
-/// Denormalised queue row used by MediaControls for display.
-/// Built by `Database::get_queue_with_details` so the render loop never
-/// needs to touch the database.
 #[derive(Debug, Clone)]
 pub struct QueueDisplayItem {
     pub queue_id: i32,

@@ -6,8 +6,6 @@ use crate::db::models::Episode;
 use crate::state::AppState;
 use crate::types::{Page, SortOrder};
 
-/// Local UI state for the podcast detail page.
-/// Search, sort, and the expanded-description flag are pure rendering concerns.
 #[derive(Default)]
 pub struct PodcastDetailPage {
     search_query: String,
@@ -28,7 +26,7 @@ impl PodcastDetailPage {
         state: &mut AppState,
         cmd_tx: &UnboundedSender<AppCommand>,
     ) {
-        // ── Loading state ─────────────────────────────────────────────────────
+        // Loading state
         let Some(podcast) = state.detail_podcast.clone() else {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
@@ -41,7 +39,7 @@ impl PodcastDetailPage {
         ui.vertical(|ui| {
             ui.add_space(10.0);
 
-            // ── Header ────────────────────────────────────────────────────────
+            // Header
             ui.horizontal(|ui| {
                 if ui
                     .button(format!("{} Back", egui_phosphor::regular::ARROW_LEFT))
@@ -69,8 +67,6 @@ impl PodcastDetailPage {
                     let should_truncate = podcast.description.len() > 250;
 
                     if should_truncate && !self.description_expanded {
-                        // Guard against a panic if description is < 250 chars
-                        // despite the flag (e.g. multibyte boundary).
                         let end = podcast
                             .description
                             .char_indices()
@@ -111,7 +107,7 @@ impl PodcastDetailPage {
             ui.separator();
             ui.add_space(10.0);
 
-            // ── Episode filter bar ────────────────────────────────────────────
+            // Episode filter bar
             ui.horizontal(|ui| {
                 ui.label("Search:");
                 ui.text_edit_singleline(&mut self.search_query);
@@ -144,7 +140,7 @@ impl PodcastDetailPage {
 
             ui.add_space(10.0);
 
-            // ── Episode list ──────────────────────────────────────────────────
+            // Episode list
             let episodes = self.filtered_episodes(&state.detail_episodes);
 
             let current_episode_id = state.now_playing.as_ref().map(|np| np.episode_id);
@@ -158,15 +154,13 @@ impl PodcastDetailPage {
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
 
-                            // Derive text color once — played episodes are muted unless
-                            // currently playing (which should always feel active).
                             let text_color = if episode.is_played && !is_current {
                                 egui::Color32::from_rgb(120, 120, 125)
                             } else {
                                 ui.visuals().text_color()
                             };
 
-                            // ── Play/pause icon ───────────────────────────────
+                            // Play/pause icon
                             let (rect, response) = ui
                                 .allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
 
@@ -204,7 +198,7 @@ impl PodcastDetailPage {
 
                             ui.add_space(10.0);
 
-                            // ── Title (truncated) ─────────────────────────────
+                            // Title (truncated)
                             let title = if episode.title.len() > 50 {
                                 let end = episode
                                     .title
@@ -218,7 +212,7 @@ impl PodcastDetailPage {
                             };
                             ui.label(egui::RichText::new(title).color(text_color));
 
-                            // ── Right-side actions ────────────────────────────
+                            // Right-side actions
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -302,7 +296,6 @@ impl PodcastDetailPage {
         });
     }
 
-    /// Filter and sort episodes locally each frame — no DB calls, no commands.
     fn filtered_episodes<'a>(&self, episodes: &'a [Episode]) -> Vec<&'a Episode> {
         let query = self.search_query.to_lowercase();
 

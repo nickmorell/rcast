@@ -22,7 +22,6 @@ impl FolderPicker for RfdFolderPicker {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let rt = self.runtime.clone();
 
-        // [ADDED] Spawn on tokio runtime to avoid blocking UI thread
         rt.spawn(async move {
             let mut dialog = AsyncFileDialog::new().set_title("Select Download Directory");
 
@@ -31,8 +30,6 @@ impl FolderPicker for RfdFolderPicker {
                 dialog = dialog.set_directory(&start);
             }
 
-            // pick_folder() returns Option<FileHandle>
-            // [CHANGED] Convert external FileHandle to domain PathBuf at boundary
             let result = dialog
                 .pick_folder()
                 .await

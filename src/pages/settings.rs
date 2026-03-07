@@ -7,7 +7,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use crate::commands::AppCommand;
 use crate::ports::{FilePicker, FolderPicker};
 use crate::state::AppState;
-use crate::types::{Page, Settings};
+use crate::types::{HomeDensity, Page, Settings};
 
 pub struct SettingsPage {
     working: Settings,
@@ -46,10 +46,6 @@ impl SettingsPage {
         self.working = settings;
     }
 
-    pub fn set_previous_page(&mut self, page: Page) {
-        self.previous_page = page;
-    }
-
     fn poll_folder_selection(&mut self) {
         if let Some(rx) = self.pending_folder_selection.as_mut() {
             match rx.try_recv() {
@@ -68,7 +64,7 @@ impl SettingsPage {
         }
     }
 
-    /// Returns the import path if the dialog just resolved, `None` otherwise.
+    // Returns the import path if the dialog just resolved, `None` otherwise.
     fn poll_import_path(&mut self) -> Option<PathBuf> {
         if let Some(rx) = self.pending_import_path.as_mut() {
             match rx.try_recv() {
@@ -85,7 +81,6 @@ impl SettingsPage {
         None
     }
 
-    /// Returns the export path if the dialog just resolved, `None` otherwise.
     fn poll_export_path(&mut self) -> Option<PathBuf> {
         if let Some(rx) = self.pending_export_path.as_mut() {
             match rx.try_recv() {
@@ -110,7 +105,6 @@ impl SettingsPage {
     ) {
         self.poll_folder_selection();
 
-        // Fire commands as soon as the file dialogs resolve.
         if let Some(path) = self.poll_import_path() {
             let _ = cmd_tx.send(AppCommand::ImportOpml { path });
         }
@@ -174,6 +168,24 @@ impl SettingsPage {
                 ui.checkbox(&mut self.working.auto_play_next, "");
             });
 
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
+                ui.label("Home View:");
+                ui.add_space(10.0);
+                ui.selectable_value(
+                    &mut self.working.home_density,
+                    HomeDensity::Grid,
+                    "Grid",
+                );
+                ui.add_space(4.0);
+                ui.selectable_value(
+                    &mut self.working.home_density,
+                    HomeDensity::List,
+                    "List",
+                );
+            });
+
             ui.add_space(40.0);
 
             ui.horizontal(|ui| {
@@ -211,7 +223,7 @@ impl SettingsPage {
             ui.separator();
             ui.add_space(16.0);
 
-            // ── OPML import / export ──────────────────────────────────────────
+            // OPML import / export
             ui.label(
                 egui::RichText::new("Subscriptions")
                     .strong()

@@ -29,12 +29,13 @@ pub struct Episode {
     pub updated_at: i64,
 }
 
-/// A user-created note, optionally tied to a timestamp.
-///
-/// Three natural types emerge from the data:
-/// - Podcast-level note: `episode_id` is None, `position_seconds` is None
-/// - Timed episode note: `episode_id` is Some, `position_seconds` is Some
-/// - General episode note: `episode_id` is Some, `position_seconds` is None
+/** A user-created note, optionally tied to a timestamp.
+
+    Three types:
+    - Podcast-level note: `episode_id` is None, `position_seconds` is None
+    - Timed episode note: `episode_id` is Some, `position_seconds` is Some
+    - General episode note: `episode_id` is Some, `position_seconds` is None
+*/
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bookmark {
     pub id: i32,

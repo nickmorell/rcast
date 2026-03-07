@@ -23,7 +23,7 @@ impl DownloadManager {
         self.find_file(folders, file_name).is_some()
     }
 
-    /// Returns the full path of a downloaded file if it exists, or `None`.
+    // Returns the full path of a downloaded file if it exists, or `None`.
     pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<std::path::PathBuf> {
         let download_path = self.database.get_download_directory_sync().ok()?;
         let download_dir = construct_download_path(download_path, folders);

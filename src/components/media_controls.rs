@@ -11,9 +11,6 @@ use std::time::Duration;
 pub struct MediaControls;
 
 impl MediaControls {
-    /// `queue_items` is the pre-built display list from `AppState::queue_display`.
-    /// The database is no longer passed in — all lookups were moved to
-    /// `Database::get_queue_with_details` in the orchestrator.
     pub fn render(
         ui: &mut egui::Ui,
         audio_player: &AudioPlayer,
@@ -38,7 +35,7 @@ impl MediaControls {
         ui.spacing_mut().item_spacing.x = 0.0;
 
         ui.horizontal(|ui| {
-            // ── LEFT: now-playing info ────────────────────────────────────────
+            // LEFT: now-playing info
             ui.allocate_ui_with_layout(
                 egui::vec2(left_width, ui.available_height()),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -81,7 +78,7 @@ impl MediaControls {
                 },
             );
 
-            // ── MIDDLE: transport controls + seek bar ─────────────────────────
+            // MIDDLE: playback controls + seek bar
             ui.allocate_ui_with_layout(
                 egui::vec2(middle_width, ui.available_height()),
                 egui::Layout::top_down(egui::Align::Center),
@@ -182,7 +179,7 @@ impl MediaControls {
 
             ui.add_space(15.0);
 
-            // ── RIGHT: speed, queue, volume ───────────────────────────────────
+            // RIGHT: notes, speed, queue, volume
             ui.allocate_ui_with_layout(
                 egui::vec2(right_width, ui.available_height()),
                 egui::Layout::right_to_left(egui::Align::Center),
@@ -241,7 +238,6 @@ impl MediaControls {
 
                     ui.add_space(5.0);
 
-                    // Notes button — highlighted when the panel is open
                     let notes_icon = egui::RichText::new(egui_phosphor::regular::NOTE_PENCIL)
                         .size(20.0)
                         .color(if notes_open {

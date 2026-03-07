@@ -32,17 +32,10 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play(&self, audio_path: &str, episode_id: i32) -> Result<(), String> {
-        self.play_from_file(audio_path, episode_id)
-    }
-
-    /// Play from a file path (tier 1 — user downloads).
     pub fn play_from_file(&self, path: &str, episode_id: i32) -> Result<(), String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let source = Decoder::new(file).map_err(|e| e.to_string())?;
 
-        // Try total_duration() first (works for OGG, WAV, FLAC).
-        // Fall back to scanning the file for MP3 frame headers.
         let duration = source.total_duration().unwrap_or_else(|| {
             std::fs::read(path)
                 .ok()
@@ -53,8 +46,6 @@ impl AudioPlayer {
         self.start_source(source, episode_id, duration)
     }
 
-    /// Play directly from in-memory bytes (tier 2 — audio cache, tier 3 — fresh fetch).
-    /// `Cursor<Bytes>` satisfies `Read + Seek` so rodio can decode it without any copy.
     pub fn play_from_memory(&self, bytes: Bytes, episode_id: i32) -> Result<(), String> {
         let cursor = Cursor::new(bytes.clone());
         let source = Decoder::new(cursor).map_err(|e| e.to_string())?;
@@ -66,7 +57,6 @@ impl AudioPlayer {
         self.start_source(source, episode_id, duration)
     }
 
-    /// Shared setup: stop any current track, open the sink, start playback.
     fn start_source<S>(&self, source: S, episode_id: i32, duration: Duration) -> Result<(), String>
     where
         S: Source<Item = f32> + Send + 'static,
@@ -184,13 +174,15 @@ impl AudioPlayer {
     }
 }
 
-/// Estimates playback duration from raw audio bytes.
-///
-/// For MP3 files, parses the first valid frame header to extract the bitrate,
-/// then divides total file size by bytes-per-second. This is accurate for CBR
-/// files and a reasonable estimate for VBR. Runs in microseconds.
-///
-/// Returns `None` if the format is unrecognised or the header is malformed.
+/**
+    Estimates playback duration from raw audio bytes.
+
+    For MP3 files, parses the first valid frame header to extract the bitrate,
+    then divides total file size by bytes-per-second. This is accurate for CBR
+    files and a reasonable estimate for VBR. Runs in microseconds.
+
+    Returns `None` if the format is unrecognised or the header is malformed.
+*/
 fn estimate_duration(bytes: &[u8]) -> Option<Duration> {
     if bytes.len() < 4 {
         return None;

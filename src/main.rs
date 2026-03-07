@@ -36,7 +36,6 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    // Build all shared state before entering the egui event loop.
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -44,7 +43,6 @@ fn main() -> eframe::Result {
     let audio_player = AudioPlayer::new();
     let download_manager = DownloadManager::new(db.clone());
 
-    // Spawn the orchestrator onto the tokio runtime.
     tokio_runtime.spawn(
         Orchestrator::new(cmd_rx, event_tx, db, audio_player.clone(), download_manager).run(),
     );
