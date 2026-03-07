@@ -26,7 +26,7 @@ impl ImageCache {
         }
     }
 
-    pub fn get_or_load(&self, mut url: &str, ctx: &egui::Context) -> Option<TextureHandle> {
+    pub fn get_or_load(&self, url: &str, ctx: &egui::Context) -> Option<TextureHandle> {
         let parsed_url = Self::strip_query(url).unwrap();
         let cache_key = self.url_to_cache_key(parsed_url.as_str());
         {

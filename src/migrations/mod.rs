@@ -16,8 +16,13 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         [],
     )?;
 
-    let migrations: Vec<&dyn Migration> =
-        vec![&versions::initial_migration_02082026::InitialMigration];
+    let migrations: Vec<&dyn Migration> = vec![
+        &versions::initial_migration_02082026::InitialMigration,
+        &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
+        &versions::add_episode_position::AddEpisodePosition,
+        &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+        &versions::create_bookmarks_table::CreateBookmarksTable,
+    ];
 
     let mut names = HashSet::new();
     for m in &migrations {
@@ -45,8 +50,13 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
 pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
     let tx = conn.transaction()?;
 
-    let migrations: Vec<&dyn Migration> =
-        vec![&versions::initial_migration_02082026::InitialMigration];
+    let migrations: Vec<&dyn Migration> = vec![
+        &versions::initial_migration_02082026::InitialMigration,
+        &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
+        &versions::add_episode_position::AddEpisodePosition,
+        &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+        &versions::create_bookmarks_table::CreateBookmarksTable,
+    ];
 
     let target_pos = migrations
         .iter()
@@ -78,8 +88,12 @@ pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
 pub fn rollback_n(conn: &mut Connection, count: usize) -> Result<()> {
     let tx = conn.transaction()?;
 
-    let migrations: Vec<&dyn Migration> =
-        vec![&versions::initial_migration_02082026::InitialMigration];
+    let migrations: Vec<&dyn Migration> = vec![
+        &versions::initial_migration_02082026::InitialMigration,
+        &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
+        &versions::add_episode_position::AddEpisodePosition,
+        &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+    ];
 
     let limit: i64 = count as i64;
 

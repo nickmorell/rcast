@@ -1,8 +1,8 @@
 use crate::{
     audio_player::AudioPlayer,
-    database::Database,
+    db::models::Episode,
     image_cache::ImageCache,
-    types::{Episode, Settings},
+    types::{QueueDisplayItem, Settings},
 };
 use egui::Color32;
 use egui_alignments::center_horizontal;
@@ -14,7 +14,7 @@ impl MediaControls {
     pub fn render(
         ui: &mut egui::Ui,
         audio_player: &AudioPlayer,
-        database: &Database,
+        queue_items: &[QueueDisplayItem],
         image_cache: &ImageCache,
         _settings: &Settings,
         current_episode: Option<&Episode>,
@@ -23,17 +23,9 @@ impl MediaControls {
         volume: &mut f32,
         show_queue: &mut bool,
         show_speed_menu: &mut bool,
+        notes_open: bool,
     ) -> MediaControlsAction {
         let mut action = MediaControlsAction::None;
-
-        if ui.input(|i| i.pointer.any_click()) {
-            let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-            if let Some(pos) = pointer_pos {
-                if *show_queue || *show_speed_menu {
-                    ui.data_mut(|d| d.insert_temp(egui::Id::new("last_click_pos"), pos));
-                }
-            }
-        }
 
         let total_width = ui.available_width();
         let left_width = total_width * 0.20;
@@ -43,7 +35,7 @@ impl MediaControls {
         ui.spacing_mut().item_spacing.x = 0.0;
 
         ui.horizontal(|ui| {
-            // LEFT SECTION
+            // LEFT: now-playing info
             ui.allocate_ui_with_layout(
                 egui::vec2(left_width, ui.available_height()),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -69,7 +61,13 @@ impl MediaControls {
 
                             if let Some(episode) = current_episode {
                                 let title = if episode.title.len() > 30 {
-                                    format!("{}...", &episode.title[..27])
+                                    let end = episode
+                                        .title
+                                        .char_indices()
+                                        .nth(27)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(episode.title.len());
+                                    format!("{}...", &episode.title[..end])
                                 } else {
                                     episode.title.clone()
                                 };
@@ -80,7 +78,7 @@ impl MediaControls {
                 },
             );
 
-            // MIDDLE SECTION
+            // MIDDLE: playback controls + seek bar
             ui.allocate_ui_with_layout(
                 egui::vec2(middle_width, ui.available_height()),
                 egui::Layout::top_down(egui::Align::Center),
@@ -93,7 +91,8 @@ impl MediaControls {
                             let skip_back_btn = ui.add_enabled(
                                 has_audio,
                                 egui::Button::new(
-                                    egui::RichText::new(egui_phosphor::regular::SKIP_BACK).size(28.0),
+                                    egui::RichText::new(egui_phosphor::regular::SKIP_BACK)
+                                        .size(28.0),
                                 ),
                             );
                             if skip_back_btn.clicked() {
@@ -114,9 +113,10 @@ impl MediaControls {
 
                             let play_pause_btn = ui.add_enabled(
                                 has_audio,
-                                egui::Button::new(egui::RichText::new(play_pause_icon).size(28.0)),
+                                egui::Button::new(
+                                    egui::RichText::new(play_pause_icon).size(28.0),
+                                ),
                             );
-
                             if play_pause_btn.clicked() {
                                 action = MediaControlsAction::PlayPause;
                             }
@@ -154,29 +154,32 @@ impl MediaControls {
 
                             ui.scope(|ui| {
                                 ui.spacing_mut().slider_width = ui.available_width() * 0.90;
-                                let slider = egui::Slider::new(&mut pos_secs, 0.0..=dur_secs)
+                                let slider = egui::Slider::new(
+                                    &mut pos_secs,
+                                    0.0..=dur_secs.max(1.0),
+                                )
                                     .show_value(false)
                                     .update_while_editing(true)
                                     .trailing_fill(true);
 
-                                let slider_response = ui.add_enabled(has_audio,  slider);
-
+                                let slider_response = ui.add_enabled(has_audio, slider);
                                 if has_audio && slider_response.changed() {
-                                    action = MediaControlsAction::Seek(Duration::from_secs_f32(pos_secs));
+                                    action = MediaControlsAction::Seek(
+                                        Duration::from_secs_f32(pos_secs),
+                                    );
                                 }
                             });
 
-
                             ui.add_space(10.0);
-
                             ui.label(format_duration(duration));
                         });
                     });
-                });
+                },
+            );
 
             ui.add_space(15.0);
 
-            // RIGHT SECTION
+            // RIGHT: notes, speed, queue, volume
             ui.allocate_ui_with_layout(
                 egui::vec2(right_width, ui.available_height()),
                 egui::Layout::right_to_left(egui::Align::Center),
@@ -191,24 +194,33 @@ impl MediaControls {
                     }
 
                     if *show_speed_menu {
-                        let area_response = egui::Area::new(egui::Id::new("speed_menu"))
-                            .fixed_pos(speed_btn.rect.left_bottom())
-                            .show(ui.ctx(), |ui| {
-                                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.vertical(|ui| {
-                                        for &spd in &[2.0, 1.5, 1.25, 1.0, 0.75] {
-                                            if ui.selectable_label(speed == spd, format!("{}x", spd)).clicked() {
-                                                action = MediaControlsAction::SetSpeed(spd);
-                                                *show_speed_menu = false;
+                        let area_response =
+                            egui::Area::new(egui::Id::new("speed_menu"))
+                                .fixed_pos(speed_btn.rect.left_bottom())
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.vertical(|ui| {
+                                            for &spd in &[2.0f32, 1.5, 1.25, 1.0, 0.75] {
+                                                if ui
+                                                    .selectable_label(
+                                                        speed == spd,
+                                                        format!("{}x", spd),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action = MediaControlsAction::SetSpeed(spd);
+                                                    *show_speed_menu = false;
+                                                }
                                             }
-                                        }
+                                        });
                                     });
                                 });
-                            });
 
                         if ui.input(|i| i.pointer.any_click()) {
                             if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                                if !area_response.response.rect.contains(pos) && !speed_btn.rect.contains(pos) {
+                                if !area_response.response.rect.contains(pos)
+                                    && !speed_btn.rect.contains(pos)
+                                {
                                     *show_speed_menu = false;
                                 }
                             }
@@ -217,69 +229,109 @@ impl MediaControls {
 
                     ui.add_space(5.0);
 
-                    let queue_btn = ui.button(egui::RichText::new(egui_phosphor::regular::QUEUE).size(20.0));
+                    let queue_btn = ui.button(
+                        egui::RichText::new(egui_phosphor::regular::QUEUE).size(20.0),
+                    );
                     if queue_btn.clicked() {
                         *show_queue = !*show_queue;
                     }
 
+                    ui.add_space(5.0);
+
+                    let notes_icon = egui::RichText::new(egui_phosphor::regular::NOTE_PENCIL)
+                        .size(20.0)
+                        .color(if notes_open {
+                            egui::Color32::from_rgb(140, 180, 255)
+                        } else {
+                            ui.visuals().text_color()
+                        });
+                    let notes_btn = ui.button(notes_icon)
+                        .on_hover_text(if notes_open { "Close notes" } else { "Open notes" });
+                    if notes_btn.clicked() {
+                        action = MediaControlsAction::ToggleNotes;
+                    }
+
                     if *show_queue {
-                        let queue_items = database.get_queue().unwrap_or_default();
+                        let area_response =
+                            egui::Area::new(egui::Id::new("queue_menu"))
+                                .fixed_pos(queue_btn.rect.left_bottom())
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_width(350.0);
+                                        ui.set_max_height(400.0);
 
-                        let area_response = egui::Area::new(egui::Id::new("queue_menu"))
-                            .fixed_pos(queue_btn.rect.left_bottom())
-                            .show(ui.ctx(), |ui| {
-                                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.set_width(350.0);
-                                    ui.set_max_height(400.0);
+                                        if queue_items.is_empty() {
+                                            ui.label("Queue is empty");
+                                        } else {
+                                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                                for item in queue_items {
+                                                    ui.horizontal(|ui| {
+                                                        ui.vertical(|ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(
+                                                                    &item.podcast_title,
+                                                                )
+                                                                    .small()
+                                                                    .color(Color32::from_rgb(
+                                                                        180, 180, 180,
+                                                                    )),
+                                                            );
 
-                                    if queue_items.is_empty() {
-                                        ui.label("Queue is empty");
-                                    } else {
-                                        egui::ScrollArea::vertical().show(ui, |ui| {
-                                            for item in &queue_items {
-                                                let episode_info = database.get_podcasts().ok().and_then(|podcasts| {
-                                                    for podcast in podcasts {
-                                                        if let Ok(episodes) = database.get_episodes_by_podcast_id(podcast.id.unwrap()) {
-                                                            if let Some(episode) = episodes.iter().find(|e| e.id == Some(item.episode_id)) {
-                                                                return Some((episode.title.clone(), podcast.title.clone()));
-                                                            }
-                                                        }
-                                                    }
-                                                    None
-                                                });
-
-                                                ui.horizontal(|ui| {
-                                                    ui.vertical(|ui| {
-                                                        if let Some((episode_title, podcast_title)) = episode_info {
-                                                            ui.label(egui::RichText::new(&podcast_title).small().color(Color32::from_rgb(180, 180, 180)));
-
-                                                            let title = if episode_title.len() > 35 {
-                                                                format!("{}...", &episode_title[..32])
+                                                            let title = if item.episode_title.len()
+                                                                > 35
+                                                            {
+                                                                let end = item
+                                                                    .episode_title
+                                                                    .char_indices()
+                                                                    .nth(32)
+                                                                    .map(|(i, _)| i)
+                                                                    .unwrap_or(
+                                                                        item.episode_title.len(),
+                                                                    );
+                                                                format!(
+                                                                    "{}...",
+                                                                    &item.episode_title[..end]
+                                                                )
                                                             } else {
-                                                                episode_title
+                                                                item.episode_title.clone()
                                                             };
                                                             ui.label(title);
-                                                        } else {
-                                                            ui.label(format!("Episode {}", item.episode_id));
-                                                        }
-                                                    });
+                                                        });
 
-                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                        if ui.button(egui::RichText::new(egui_phosphor::regular::X).size(16.0)).clicked() {
-                                                            action = MediaControlsAction::RemoveFromQueue(item.id.unwrap());
-                                                        }
+                                                        ui.with_layout(
+                                                            egui::Layout::right_to_left(
+                                                                egui::Align::Center,
+                                                            ),
+                                                            |ui| {
+                                                                if ui
+                                                                    .button(
+                                                                        egui::RichText::new(
+                                                                            egui_phosphor::regular::X,
+                                                                        )
+                                                                            .size(16.0),
+                                                                    )
+                                                                    .clicked()
+                                                                {
+                                                                    action =
+                                                                        MediaControlsAction::RemoveFromQueue(
+                                                                            item.queue_id,
+                                                                        );
+                                                                }
+                                                            },
+                                                        );
                                                     });
-                                                });
-                                                ui.separator();
-                                            }
-                                        });
-                                    }
+                                                    ui.separator();
+                                                }
+                                            });
+                                        }
+                                    });
                                 });
-                            });
 
                         if ui.input(|i| i.pointer.any_click()) {
                             if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                                if !area_response.response.rect.contains(pos) && !queue_btn.rect.contains(pos) {
+                                if !area_response.response.rect.contains(pos)
+                                    && !queue_btn.rect.contains(pos)
+                                {
                                     *show_queue = false;
                                 }
                             }
@@ -291,14 +343,16 @@ impl MediaControls {
                     let volume_slider = egui::Slider::new(volume, 0.0..=100.0)
                         .show_value(false)
                         .trailing_fill(true);
-
                     if ui.add(volume_slider).changed() {
                         action = MediaControlsAction::VolumeChanged(*volume);
                     }
 
                     ui.add_space(5.0);
-                    ui.label(egui::RichText::new(egui_phosphor::regular::SPEAKER_HIGH).size(20.0));
-                });
+                    ui.label(
+                        egui::RichText::new(egui_phosphor::regular::SPEAKER_HIGH).size(20.0),
+                    );
+                },
+            );
         });
 
         action
@@ -328,4 +382,5 @@ pub enum MediaControlsAction {
     VolumeChanged(f32),
     SetSpeed(f32),
     RemoveFromQueue(i32),
+    ToggleNotes,
 }

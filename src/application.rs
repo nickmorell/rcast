@@ -1,343 +1,386 @@
-use crate::components::media_controls::MediaControlsAction;
-use crate::{
-    audio_downloader::AudioDownloader,
-    audio_player::{AudioPlayer, PlaybackState},
-    components::{AddPodcastModal, MediaControls},
-    database::Database,
-    image_cache::ImageCache,
-    pages::{HomePage, PodcastDetailPage, SettingsPage, podcast_detail::EpisodeAction},
-    rss_sync::RssSync,
-    types::{Episode, Page, Settings},
-};
+use egui::Context;
+use std::sync::Arc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+use crate::audio_player::{AudioPlayer, PlaybackState};
+use crate::commands::AppCommand;
+use crate::components::add_podcast_modal::AddPodcastModal;
+use crate::components::notes_panel::NotesPanel;
+use crate::components::toast;
+use crate::events::AppEvent;
+use crate::pages::{home::HomePage, podcast_detail::PodcastDetailPage, settings::SettingsPage};
+use crate::ports::{FilePicker, FolderPicker};
+use crate::state::AppState;
+use crate::types::Page;
 
 pub struct RCast {
-    database: Database,
-    image_cache: ImageCache,
-    audio_downloader: AudioDownloader,
-    audio_player: AudioPlayer,
-    rss_sync: RssSync,
+    pub cmd_tx: UnboundedSender<AppCommand>,
+    pub event_rx: UnboundedReceiver<AppEvent>,
+    pub state: AppState,
+    pub current_page: Page,
 
-    // Pages
-    current_page: Page,
-    home_page: HomePage,
-    podcast_detail_page: PodcastDetailPage,
-    settings_page: SettingsPage,
+    pub audio_player: AudioPlayer,
 
-    // Modals
-    add_podcast_modal: AddPodcastModal,
+    pub add_podcast_modal: AddPodcastModal,
 
-    // State
-    settings: Settings,
-    current_episode: Option<Episode>,
-    current_podcast_title: Option<String>,
-    volume: f32,
-    show_queue: bool,
-    show_speed_menu: bool,
-    last_finished_episode_id: Option<i32>, // Track to prevent duplicate autoplay triggers
-}
+    pub notes_panel: NotesPanel,
 
-impl Default for RCast {
-    fn default() -> Self {
-        let database = Database::default();
-        let settings = database.get_settings().unwrap_or_default();
-        let audio_player = AudioPlayer::new();
-        let rss_sync = RssSync::new(database.clone());
-
-        // Start background sync
-        let sync_interval = settings.sync_interval_minutes;
-        rss_sync.start_background_sync(sync_interval);
-
-        let sync_clone = RssSync::new(database.clone());
-        std::thread::spawn(move || {
-            sync_clone.sync_all_podcasts();
-        });
-
-        let volume = settings.default_volume;
-        audio_player.set_volume(volume);
-
-        let home_page = HomePage::new(&database);
-        let settings_page = SettingsPage::new(&database);
-
-        Self {
-            image_cache: ImageCache::new(),
-            audio_downloader: AudioDownloader::new(),
-            audio_player,
-            rss_sync,
-            current_page: Page::Home,
-            home_page,
-            podcast_detail_page: PodcastDetailPage::new(),
-            settings_page,
-            add_podcast_modal: AddPodcastModal::new(),
-            settings,
-            current_episode: None,
-            current_podcast_title: None,
-            volume,
-            show_queue: false,
-            show_speed_menu: false,
-            last_finished_episode_id: None,
-            database,
-        }
-    }
+    pub home_page: HomePage,
+    pub podcast_detail_page: PodcastDetailPage,
+    pub settings_page: SettingsPage,
 }
 
 impl RCast {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(
+        cmd_tx: UnboundedSender<AppCommand>,
+        event_rx: UnboundedReceiver<AppEvent>,
+        audio_player: AudioPlayer,
+        folder_picker: Arc<dyn FolderPicker>,
+        file_picker: Arc<dyn FilePicker>,
+    ) -> Self {
+        let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
+
+        let mut settings_page = SettingsPage::default();
+        settings_page.set_folder_picker(folder_picker);
+        settings_page.set_file_picker(file_picker);
+
+        Self {
+            cmd_tx,
+            event_rx,
+            state: AppState::default(),
+            current_page: Page::Home,
+            audio_player,
+            add_podcast_modal: AddPodcastModal::new(),
+            notes_panel: NotesPanel::default(),
+            home_page: HomePage::default(),
+            podcast_detail_page: PodcastDetailPage::default(),
+            settings_page,
+        }
     }
 
-    fn handle_episode_action(&mut self, action: EpisodeAction) {
-        match action {
-            EpisodeAction::Play(episode_id) => {
-                self.play_episode(episode_id);
+    fn handle_event(&mut self, event: AppEvent) {
+        match event {
+            // Navigation
+            AppEvent::NavigatedTo(page) => {
+                self.current_page = page;
+                // Clear stale detail data so the detail page shows a spinner
+                // rather than the previous podcast's content.
+                self.state.detail_podcast = None;
+                self.state.detail_episodes.clear();
             }
-            EpisodeAction::PlayAll(episode_id, episode_ids) => {
-                self.play_episode(episode_id);
-                let mut episode_ids = episode_ids.clone();
-                episode_ids.retain(|id| *id != episode_id);
-                for episode_id in episode_ids {
-                    self.database.add_to_queue(episode_id).ok();
+
+            // Data
+            AppEvent::PodcastsLoaded(podcasts) => {
+                self.state.podcasts = podcasts;
+            }
+            AppEvent::PodcastAdded(podcast) => {
+                self.state.podcasts.push(podcast);
+                self.state
+                    .toasts
+                    .push(toast::ToastMessage::success("Podcast added!"));
+            }
+            AppEvent::PodcastRemoved(id) => {
+                self.state.podcasts.retain(|p| p.id != id);
+            }
+            AppEvent::PodcastDetailLoaded { podcast, episodes } => {
+                self.state.detail_podcast = Some(podcast);
+                self.state.detail_episodes = episodes;
+            }
+            AppEvent::EpisodesUpdated {
+                podcast_id,
+                episodes,
+            } => {
+                if let Some(p) = self.state.podcasts.iter_mut().find(|p| p.id == podcast_id) {
+                    p.episode_count = episodes.len() as i32;
+                }
+                if self
+                    .state
+                    .detail_podcast
+                    .as_ref()
+                    .map(|p| p.id == podcast_id)
+                    .unwrap_or(false)
+                {
+                    self.state.detail_episodes = episodes;
                 }
             }
-            EpisodeAction::Pause => {
-                self.audio_player.pause();
+            AppEvent::SyncStarted(podcast_id) => {
+                self.state.syncing_podcast_ids.insert(podcast_id);
             }
-            EpisodeAction::TogglePlayed(episode_id) => {
-                if let Ok(podcasts) = self.database.get_podcasts() {
-                    for podcast in podcasts {
-                        if let Ok(episodes) = self
-                            .database
-                            .get_episodes_by_podcast_id(podcast.id.unwrap())
-                        {
-                            if let Some(episode) =
-                                episodes.iter().find(|e| e.id == Some(episode_id))
-                            {
-                                self.database
-                                    .update_episode_played(episode_id, !episode.is_played)
-                                    .ok();
-                                // Reload current page
-                                if let Page::PodcastDetail(podcast_id) = self.current_page {
-                                    self.podcast_detail_page.load(podcast_id, &self.database);
-                                }
-                                break;
-                            }
+            AppEvent::SyncCompleted(podcast_id) => {
+                self.state.syncing_podcast_ids.remove(&podcast_id);
+                // Refresh the podcast's last_synced_at in the list.
+                // The orchestrator reloads podcasts after sync so this will
+                // arrive shortly as a PodcastsLoaded event.
+            }
+
+            // Queue
+            AppEvent::QueueUpdated(items) => {
+                self.state.queue_display = items;
+            }
+
+            // Playback
+            AppEvent::PlaybackStarted {
+                episode_id,
+                podcast_id,
+            } => {
+                self.state.now_playing = Some(crate::state::NowPlaying {
+                    episode_id,
+                    podcast_id,
+                });
+            }
+            AppEvent::PlaybackStopped => {
+                self.state.now_playing = None;
+            }
+
+            // Settings
+            AppEvent::SettingsLoaded(settings) => {
+                // Apply volume immediately to the already-running audio player.
+                self.audio_player.set_volume(settings.default_volume);
+                self.state.settings = settings.clone();
+                self.settings_page.load(settings);
+            }
+            AppEvent::SettingsSaved => {
+                // SettingsSaved is followed by SettingsLoaded, which re-applies volume. Nothing else to do here.
+            }
+
+            AppEvent::OpmlImported {
+                added,
+                skipped,
+                failed,
+            } => {
+                let msg = match (added, skipped, failed) {
+                    (a, 0, 0) => format!("Imported {a} podcast{}", if a == 1 { "" } else { "s" }),
+                    (a, s, 0) => format!("Imported {a}, skipped {s} already-subscribed"),
+                    (a, 0, f) => format!("Imported {a}, {f} failed"),
+                    (a, s, f) => format!("Imported {a}, skipped {s}, {f} failed"),
+                };
+                self.state.toasts.push(toast::ToastMessage::success(&msg));
+            }
+            AppEvent::OpmlExported { path } => {
+                self.state
+                    .toasts
+                    .push(toast::ToastMessage::success(&format!("Exported to {path}")));
+            }
+
+            // Bookmarks
+            AppEvent::BookmarksLoaded {
+                episode_bookmarks,
+                podcast_bookmarks,
+            } => {
+                self.state.notes_episode_bookmarks = episode_bookmarks;
+                self.state.notes_podcast_bookmarks = podcast_bookmarks;
+            }
+            AppEvent::BookmarkAdded(bookmark) => {
+                if bookmark.episode_id.is_some() {
+                    let pos = self.state.notes_episode_bookmarks.iter().position(|b| {
+                        match (b.position_seconds, bookmark.position_seconds) {
+                            (Some(a), Some(bv)) => a > bv,
+                            (None, Some(_)) => true,
+                            _ => false,
                         }
+                    });
+                    match pos {
+                        Some(i) => self.state.notes_episode_bookmarks.insert(i, bookmark),
+                        None => self.state.notes_episode_bookmarks.push(bookmark),
+                    }
+                } else {
+                    self.state.notes_podcast_bookmarks.push(bookmark);
+                }
+            }
+            AppEvent::BookmarkUpdated(updated) => {
+                for b in self
+                    .state
+                    .notes_episode_bookmarks
+                    .iter_mut()
+                    .chain(self.state.notes_podcast_bookmarks.iter_mut())
+                {
+                    if b.id == updated.id {
+                        b.note_text = updated.note_text.clone();
+                        break;
                     }
                 }
             }
-            EpisodeAction::AddToQueue(episode_id) => {
-                self.database.add_to_queue(episode_id).ok();
+            AppEvent::BookmarkDeleted(id) => {
+                self.state.notes_episode_bookmarks.retain(|b| b.id != id);
+                self.state.notes_podcast_bookmarks.retain(|b| b.id != id);
+            }
+
+            // Cross-cutting
+            AppEvent::Toast(msg) => {
+                self.state.toasts.push(msg);
+            }
+            AppEvent::Error(msg) => {
+                self.state.toasts.push(toast::ToastMessage::error(&msg));
             }
         }
     }
 
-    fn play_episode(&mut self, episode_id: i32) {
-        println!("Playing episode ID {}", episode_id);
-        if let Ok(podcasts) = self.database.get_podcasts() {
-            let mut found = false;
-            for podcast in podcasts {
-                if let Ok(episodes) = self
-                    .database
-                    .get_episodes_by_podcast_id(podcast.id.unwrap())
-                {
-                    if let Some(episode) = episodes.iter().find(|e| e.id == Some(episode_id)) {
-                        println!(
-                            "Playing episode ID {} from podcast '{}' (podcast_id: {:?})",
-                            episode_id, podcast.title, podcast.id
-                        );
-                        self.current_episode = Some(episode.clone());
-                        self.current_podcast_title = Some(podcast.title.clone());
-
-                        println!("Playing episode URL: {}", episode.url);
-                        match self
-                            .audio_downloader
-                            .get_or_download(&episode.url, episode_id)
-                        {
-                            Ok(path) => {
-                                if let Err(e) =
-                                    self.audio_player.play(path.to_str().unwrap(), episode_id)
-                                {
-                                    eprintln!("Failed to play audio: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to download/play audio: {}", e);
-                            }
-                        }
-
-                        found = true;
-                        break;
-                    }
-                }
-                if found {
-                    break;
-                }
+    // Poll the audio player every frame to handle autoplay and track state.
+    fn poll_audio(&mut self) {
+        // Autoplay next in queue when the current track finishes.
+        if self.audio_player.is_finished()
+            && self.state.settings.auto_play_next
+            && self.state.now_playing.is_some()
+        {
+            let current_id = self.audio_player.get_current_episode_id();
+            // Guard against triggering multiple times for the same finish.
+            if current_id != self.state.now_playing.as_ref().map(|_| -1) {
+                let _ = self.cmd_tx.send(AppCommand::PlayNextInQueue);
             }
-            if !found {
-                eprintln!("Episode ID {} not found in any podcast", episode_id);
-            }
+        }
+
+        // Reset now_playing when audio stops without autoplay.
+        if !self.audio_player.is_finished()
+            && self.audio_player.get_state() == PlaybackState::Stopped
+            && self.state.now_playing.is_some()
+        {
+            self.state.now_playing = None;
         }
     }
 }
 
 impl eframe::App for RCast {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Request repaint for smooth playback progress
-        ctx.request_repaint();
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Drain all pending background events
+        while let Ok(event) = self.event_rx.try_recv() {
+            self.handle_event(event);
+        }
 
-        // Check if audio has finished and autoplay next is enabled
-        if self.audio_player.is_finished() && self.settings.auto_play_next {
-            // Only trigger autoplay once per finished episode
-            let current_ep_id = self.audio_player.get_current_episode_id();
-            if current_ep_id != self.last_finished_episode_id {
-                self.last_finished_episode_id = current_ep_id;
+        // Check if any page requested the Add Podcast modal
+        if self.state.open_add_podcast_requested {
+            self.add_podcast_modal.open();
+            self.state.open_add_podcast_requested = false;
+        }
 
-                // Get the next item in the queue
-                if let Ok(queue_items) = self.database.get_queue() {
-                    println!("Queue has {} items", queue_items.len());
-                    if let Some(first_item) = queue_items.first() {
-                        let episode_id = first_item.episode_id;
-                        let queue_id = first_item.id.unwrap();
-                        println!("Auto-playing episode ID {} from queue", episode_id);
-
-                        // Remove from queue
-                        self.database.remove_from_queue(queue_id).ok();
-
-                        // Play the episode
-                        self.handle_episode_action(EpisodeAction::Play(episode_id));
-                    } else {
-                        println!("Queue is empty, stopping playback");
-                        // No more items in the queue, reset to stopped state
-                        self.audio_player.stop();
-                        self.current_episode = None;
-                        self.current_podcast_title = None;
-                    }
-                }
-            }
-        } else if !self.audio_player.is_finished() {
-            // Reset the flag when audio is playing
-            if self.audio_player.get_state() == PlaybackState::Playing {
-                if self.last_finished_episode_id.is_some() {
-                    self.last_finished_episode_id = None;
-                }
+        // Handle notes panel open requests (from detail page or media controls)
+        if let Some((episode_id, podcast_id, title)) = self.state.notes_open_request.take() {
+            let changed = self.notes_panel.open(episode_id, podcast_id, title);
+            if changed {
+                self.state.notes_episode_bookmarks.clear();
+                self.state.notes_podcast_bookmarks.clear();
+                let _ = self.cmd_tx.send(AppCommand::LoadBookmarks {
+                    podcast_id,
+                    episode_id,
+                });
             }
         }
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Add Podcast").clicked() {
-                        self.add_podcast_modal.open();
-                        ui.close();
-                    }
+        // Poll audio player for autoplay / stop detection
+        self.poll_audio();
 
-                    if ui.button("Settings").clicked() {
-                        self.settings_page
-                            .set_previous_page(self.current_page.clone());
-                        self.current_page = Page::Settings;
-                        ui.close();
-                    }
+        // Request repaints while audio is playing so the seek bar stays smooth.
+        if self.audio_player.get_state() == PlaybackState::Playing {
+            ctx.request_repaint();
+        }
 
-                    ui.separator();
+        // Menu bar
+        if crate::components::menu::render(ctx, &self.cmd_tx) {
+            self.add_podcast_modal.open();
+        }
 
-                    if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
+        // Notes panel
+        {
+            let now_playing_id = self.state.now_playing.as_ref().map(|np| np.episode_id);
+            let current_pos = self.audio_player.get_position().as_secs_f64();
+            self.notes_panel.render(
+                ctx,
+                &self.state.notes_episode_bookmarks,
+                &self.state.notes_podcast_bookmarks,
+                now_playing_id,
+                current_pos,
+                &self.cmd_tx,
+            );
+            if let Some(seek_to) = self.notes_panel.seek_request.take() {
+                self.audio_player.seek(seek_to);
+            }
+        }
 
-                ui.menu_button("About", |ui| {
-                    ui.label("RCast - Podcast Player");
-                    ui.label("Version 0.1.0");
-                });
-
-                if self.rss_sync.is_syncing() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spinner();
-                        ui.label("Syncing...");
-                    });
-                }
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match &self.current_page {
-                Page::Home => {
-                    if let Some(next_page) = self.home_page.render(
-                        ui,
-                        &self.database,
-                        &self.image_cache,
-                        self.audio_player.get_current_episode_id(),
-                    ) {
-                        self.current_page = next_page.clone();
-
-                        if let Page::PodcastDetail(podcast_id) = next_page {
-                            self.podcast_detail_page.load(podcast_id, &self.database);
-                        }
-                    }
-                }
-                Page::PodcastDetail(_) => {
-                    let (next_page, episode_action) = self.podcast_detail_page.render(
-                        ui,
-                        &self.database,
-                        &self.image_cache,
-                        self.audio_player.get_current_episode_id(),
-                    );
-
-                    if let Some(page) = next_page {
-                        self.current_page = page;
-                    }
-
-                    if let Some(action) = episode_action {
-                        self.handle_episode_action(action);
-                    }
-                }
-                Page::Settings => {
-                    let (next_page, save_changes) = self.settings_page.render(ui, &self.database);
-
-                    if save_changes {
-                        // Reload settings
-                        self.settings = self.database.get_settings().unwrap_or_default();
-                        self.audio_player.set_volume(self.settings.default_volume);
-                        self.volume = self.settings.default_volume;
-                    }
-
-                    if let Some(page) = next_page {
-                        self.current_page = page;
-                    }
-                }
+        // Active page
+        egui::CentralPanel::default().show(ctx, |ui| match self.current_page.clone() {
+            Page::Home => {
+                self.home_page.render(ui, &mut self.state, &self.cmd_tx);
+            }
+            Page::PodcastDetail(_) => {
+                self.podcast_detail_page
+                    .render(ui, &mut self.state, &self.cmd_tx);
+            }
+            Page::Settings => {
+                self.settings_page.render(ui, &mut self.state, &self.cmd_tx);
             }
         });
 
+        // Media controls
         egui::TopBottomPanel::bottom("media_controls")
             .min_height(80.0)
             .show(ctx, |ui| {
                 ui.add_space(5.0);
 
-                let current_podcast_image = if let Some(episode) = &self.current_episode {
-                    self.database.get_podcasts().ok().and_then(|podcasts| {
-                        podcasts
-                            .iter()
-                            .find(|p| p.id.unwrap() == episode.podcast_id)
-                            .map(|p| p.image_url.clone())
-                    })
-                } else {
-                    None
-                };
+                // Determine the current podcast's image URL for the controls.
+                let current_podcast_image = self.state.now_playing.as_ref().and_then(|np| {
+                    self.state
+                        .podcasts
+                        .iter()
+                        .find(|p| p.id == np.podcast_id)
+                        .map(|p| p.image_url.clone())
+                });
 
+                // Find the current episode and its podcast title.
+                let current_episode = self.state.now_playing.as_ref().and_then(|np| {
+                    self.state
+                        .detail_episodes
+                        .iter()
+                        .find(|e| e.id == np.episode_id)
+                        .cloned()
+                        .or_else(|| {
+                            // If the detail page isn't loaded, we don't have the episode
+                            // object handy. Audio still plays; the title is just blank.
+                            None
+                        })
+                });
+
+                let current_podcast_title = self.state.now_playing.as_ref().and_then(|np| {
+                    self.state
+                        .podcasts
+                        .iter()
+                        .find(|p| p.id == np.podcast_id)
+                        .map(|p| p.title.clone())
+                });
+
+                use crate::components::media_controls::{MediaControls, MediaControlsAction};
+
+                let mut volume = self.state.settings.default_volume;
                 let action = MediaControls::render(
                     ui,
                     &self.audio_player,
-                    &self.database,
-                    &self.image_cache,
-                    &self.settings,
-                    self.current_episode.as_ref(),
-                    self.current_podcast_title.as_deref(),
+                    &self.state.queue_display,
+                    &self.state.image_cache,
+                    &self.state.settings,
+                    current_episode.as_ref(),
+                    current_podcast_title.as_deref(),
                     current_podcast_image.as_deref(),
-                    &mut self.volume,
-                    &mut self.show_queue,
-                    &mut self.show_speed_menu,
+                    &mut volume,
+                    &mut self.home_page.show_queue,
+                    &mut self.home_page.show_speed_menu,
+                    self.notes_panel.visible,
                 );
 
                 match action {
+                    MediaControlsAction::ToggleNotes => {
+                        if self.notes_panel.visible {
+                            self.notes_panel.close();
+                        } else if let Some(np) = &self.state.now_playing {
+                            // Open panel for the currently playing episode.
+                            let title = self
+                                .state
+                                .detail_episodes
+                                .iter()
+                                .find(|e| e.id == np.episode_id)
+                                .map(|e| e.title.clone())
+                                .unwrap_or_default();
+                            self.state.notes_open_request =
+                                Some((np.episode_id, np.podcast_id, title));
+                        }
+                    }
                     MediaControlsAction::PlayPause => match self.audio_player.get_state() {
                         PlaybackState::Playing => self.audio_player.pause(),
                         PlaybackState::Paused => self.audio_player.resume(),
@@ -345,49 +388,38 @@ impl eframe::App for RCast {
                     },
                     MediaControlsAction::SkipBackward => {
                         self.audio_player
-                            .skip_backward(self.settings.skip_backward_seconds);
+                            .skip_backward(self.state.settings.skip_backward_seconds);
                     }
                     MediaControlsAction::SkipForward => {
                         self.audio_player
-                            .skip_forward(self.settings.skip_forward_seconds);
+                            .skip_forward(self.state.settings.skip_forward_seconds);
                     }
                     MediaControlsAction::Seek(pos) => {
                         self.audio_player.seek(pos);
                     }
                     MediaControlsAction::VolumeChanged(vol) => {
                         self.audio_player.set_volume(vol);
+                        self.state.settings.default_volume = vol;
+                        volume = vol;
                     }
                     MediaControlsAction::SetSpeed(speed) => {
                         self.audio_player.set_speed(speed);
                     }
                     MediaControlsAction::RemoveFromQueue(queue_id) => {
-                        self.database.remove_from_queue(queue_id).ok();
+                        let _ = self.cmd_tx.send(AppCommand::RemoveFromQueue(queue_id));
                     }
-                    _ => {}
+                    MediaControlsAction::None => {}
                 }
 
                 ui.add_space(5.0);
             });
 
+        // Add Podcast modal
         if let Some(url) = self.add_podcast_modal.render(ctx) {
-            let rss_sync = self.rss_sync.clone();
-            std::thread::spawn(move || {
-                if let Ok(podcast) = rss_sync.fetch_and_add_podcast(&url) {
-                    println!("Added podcast: {}", podcast.title);
-                }
-            });
-
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            self.home_page.refresh(&self.database);
+            let _ = self.cmd_tx.send(AppCommand::AddPodcast { feed_url: url });
         }
-    }
-}
 
-impl Clone for RssSync {
-    fn clone(&self) -> Self {
-        Self {
-            database: self.database.clone(),
-            is_syncing: self.is_syncing.clone(),
-        }
+        // Toast overlay
+        toast::render(ctx, &mut self.state.toasts);
     }
 }
