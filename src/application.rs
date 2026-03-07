@@ -274,7 +274,7 @@ impl eframe::App for RCast {
         }
 
         // Menu bar
-        if crate::components::menu::render(ctx, &self.state, &self.cmd_tx) {
+        if crate::components::menu::render(ctx, &self.cmd_tx) {
             self.add_podcast_modal.open();
         }
 

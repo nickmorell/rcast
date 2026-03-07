@@ -280,11 +280,6 @@ impl NotesPanel {
         } else {
             SURFACE
         };
-        let hover_fill = if is_podcast_note {
-            Color32::from_rgb(52, 50, 75)
-        } else {
-            SURFACE_HOVER
-        };
 
         let note_rect = egui::Frame::new()
             .fill(base_fill)

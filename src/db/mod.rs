@@ -616,26 +616,6 @@ impl Database {
         })
         .await?
     }
-
-    pub async fn get_download_directory(&self) -> anyhow::Result<String> {
-        let conn = self.connection.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
-            let result: Result<String, _> = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'download_directory'",
-                [],
-                |row| row.get(0),
-            );
-            Ok(result.unwrap_or_else(|_| {
-                dirs::data_local_dir()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-            }))
-        })
-        .await?
-    }
 }
 
 impl Database {

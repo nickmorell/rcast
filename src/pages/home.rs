@@ -5,7 +5,7 @@ use crate::commands::AppCommand;
 use crate::components::podcast_card::PodcastCard;
 use crate::db::models::Podcast;
 use crate::state::AppState;
-use crate::types::{HomeDensity, Page, Settings, SortOrder};
+use crate::types::{HomeDensity, Page, SortOrder};
 
 pub struct HomePage {
     search_query: String,

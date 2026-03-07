@@ -43,7 +43,6 @@ pub struct AppState {
     pub toasts: ToastQueue,
 
     pub open_add_podcast_requested: bool,
-    pub seek_request: Option<std::time::Duration>,
 }
 
 impl Default for AppState {
@@ -62,7 +61,6 @@ impl Default for AppState {
             syncing_podcast_ids: HashSet::new(),
             toasts: ToastQueue::default(),
             open_add_podcast_requested: false,
-            seek_request: None,
         }
     }
 }

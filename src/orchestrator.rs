@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use bytes;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -21,7 +19,6 @@ pub struct Orchestrator {
     audio_cache: AudioCache,
     download_manager: DownloadManager,
     current_detail_podcast_id: Option<i32>,
-    last_finished_episode_id: Option<i32>,
     last_saved_position: f64,
 }
 
@@ -41,7 +38,6 @@ impl Orchestrator {
             audio_cache: AudioCache::new(10),
             download_manager,
             current_detail_podcast_id: None,
-            last_finished_episode_id: None,
             last_saved_position: 0.0,
         }
     }
