@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     branches:
-      - main
+      - master
     paths:
       # Only run when code or dependencies change.
       # Docs-only PRs (README, CHANGELOG, etc.) are skipped automatically.
