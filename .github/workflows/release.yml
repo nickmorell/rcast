@@ -4,7 +4,7 @@ on:
   # Validate version on release branch PRs
   pull_request:
     branches:
-      - main
+      - master
     paths:
       - 'Cargo.toml'
 
