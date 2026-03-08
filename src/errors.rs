@@ -1,6 +1,7 @@
 use std::fmt;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum DatabaseError {
     GenericError(String),
     MigrationError(String),
@@ -13,10 +14,12 @@ impl DatabaseError {
         Self::GenericError(message.into())
     }
 
+    #[allow(dead_code)]
     pub fn migration_error(message: impl Into<String>) -> Self {
         Self::MigrationError(message.into())
     }
 
+    #[allow(dead_code)]
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound(message.into())
     }

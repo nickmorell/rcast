@@ -226,12 +226,11 @@ impl PodcastDetailPage {
                                         Popup::toggle_id(ui.ctx(), menu_id);
                                     }
 
-                                    egui::popup_below_widget(
-                                        ui,
-                                        menu_id,
-                                        &menu_btn,
-                                        egui::PopupCloseBehavior::CloseOnClickOutside,
-                                        |ui: &mut egui::Ui| {
+                                    Popup::from_response(&menu_btn)
+                                        .close_behavior(
+                                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        )
+                                        .show(|ui: &mut egui::Ui| {
                                             ui.set_min_width(150.0);
 
                                             if ui
@@ -257,8 +256,7 @@ impl PodcastDetailPage {
                                                     cmd_tx.send(AppCommand::DownloadEpisode(ep_id));
                                                 Popup::close_id(ui.ctx(), menu_id);
                                             }
-                                        },
-                                    );
+                                        });
 
                                     ui.add_space(10.0);
                                     ui.label(

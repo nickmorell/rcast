@@ -2,6 +2,7 @@ use crate::types::{Page, Settings};
 
 // Every action the UI can request. The Orchestrator is the sole consumer.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum AppCommand {
     // -- Navigation ------------------------------------------------------------
     NavigateTo(Page),

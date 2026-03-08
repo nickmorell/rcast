@@ -10,5 +10,6 @@ pub trait Migration {
 
     fn up(&self, tx: &Transaction) -> Result<(), DatabaseError>;
 
+    #[allow(dead_code)]
     fn down(&self, tx: &Transaction) -> Result<(), DatabaseError>;
 }

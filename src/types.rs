@@ -71,6 +71,7 @@ pub struct QueueItem {
 #[derive(Debug, Clone)]
 pub struct QueueDisplayItem {
     pub queue_id: i32,
+    #[allow(dead_code)]
     pub episode_id: i32,
     pub episode_title: String,
     pub podcast_title: String,
