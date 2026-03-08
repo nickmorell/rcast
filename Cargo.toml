@@ -1,7 +1,19 @@
 [package]
 name = "rcast"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
+description = "A local-first, privacy-focused podcast client"
+homepage = "https://github.com/nickmorell/rcast"
+
+[package.metadata.bundle]
+name = "RCast"
+identifier = "com.nickmorell.rcast"
+version = "0.2.1"
+copyright = "Copyright (c) 2026 Nick Morell"
+category = "Music"
+short_description = "A local-first, privacy-focused podcast client"
+long_description = "RCast is a desktop podcast client built around a simple belief: your listening habits are your own business. No accounts, no algorithms, no cloud."
+osx_minimum_system_version = "11.0"
 
 [dependencies]
 eframe = "0.33.3"

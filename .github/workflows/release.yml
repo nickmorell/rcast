@@ -14,7 +14,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  # ── Semver validation (release/v* PRs only) ───────────────────────────────────
+  # -- Semver validation (release/v* PRs only) -----------------------------------
   validate-version:
     name: Validate version
     runs-on: ubuntu-latest
@@ -77,23 +77,39 @@ jobs:
           fi
           echo "✅ Branch name matches version"
 
-  # ── Build release binaries (tag push only) ────────────────────────────────────
-  build-release:
-    name: Build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+  # -- Windows build -------------------------------------------------------------
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            os: windows-latest
-            artifact: rcast-windows.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          - name: macOS
-            os: macos-latest
-            artifact: rcast-macos
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename binary
+        run: cp target/x86_64-pc-windows-msvc/release/rcast.exe rcast-windows.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rcast-windows.exe
+          path: rcast-windows.exe
+
+  # -- macOS build ---------------------------------------------------------------
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Checkout
@@ -107,33 +123,44 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          cargo build --release --target x86_64-pc-windows-msvc
-          cp target/x86_64-pc-windows-msvc/release/rcast.exe rcast-windows.exe
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
 
-      - name: Build universal binary (macOS)
-        if: matrix.os == 'macos-latest'
+      - name: Build universal binary
         run: |
           cargo build --release --target aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
           lipo -create \
             target/aarch64-apple-darwin/release/rcast \
             target/x86_64-apple-darwin/release/rcast \
-            -output rcast-macos
+            -output target/release/rcast
+
+      - name: Bundle into .app
+        run: cargo bundle --release
+
+      - name: Package .app into .dmg
+        run: |
+          mkdir -p dmg_staging
+          cp -r "target/release/bundle/osx/RCast.app" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create \
+            -volname "RCast" \
+            -srcfolder dmg_staging \
+            -ov \
+            -format UDZO \
+            rcast-macos.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: rcast-macos.dmg
+          path: rcast-macos.dmg
 
-  # ── Create draft release (after both builds succeed) ─────────────────────────
+  # -- Create draft release ------------------------------------------------------
   draft-release:
     name: Create draft release
     runs-on: ubuntu-latest
-    needs: build-release
+    needs: [ build-windows, build-macos ]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -158,10 +185,10 @@ jobs:
         with:
           name: rcast-windows.exe
 
-      - name: Download macOS binary
+      - name: Download macOS dmg
         uses: actions/download-artifact@v4
         with:
-          name: rcast-macos
+          name: rcast-macos.dmg
 
       - name: Create draft release
         uses: softprops/action-gh-release@v2
@@ -177,12 +204,12 @@ jobs:
 
             ## Installation
 
-            | Platform | File |
-            |----------|------|
-            | Windows | `rcast-windows.exe` |
-            | macOS (Intel + Apple Silicon) | `rcast-macos` |
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | Windows | `rcast-windows.exe` | Download and run directly |
+            | macOS | `rcast-macos.dmg` | Open the dmg, drag RCast to Applications |
 
-            **macOS:** On first launch you may need to right-click → Open to bypass Gatekeeper.
+            **macOS:** On first launch right-click → Open to bypass Gatekeeper.
           files: |
             rcast-windows.exe
-            rcast-macos
+            rcast-macos.dmg
