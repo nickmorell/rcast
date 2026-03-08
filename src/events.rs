@@ -29,6 +29,7 @@ pub enum AppEvent {
     PlaybackStarted {
         episode_id: i32,
         podcast_id: i32,
+        episode: Episode,
     },
     PlaybackStopped,
 

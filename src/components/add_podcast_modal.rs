@@ -53,6 +53,17 @@ impl AddPodcastModal {
                             .desired_width(380.0),
                     );
 
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(if cfg!(target_os = "macos") {
+                            "Tip: paste with ⌘V"
+                        } else {
+                            "Tip: paste with Ctrl+V"
+                        })
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(120, 120, 130)),
+                    );
+
                     if self.url_input.is_empty() && !response.has_focus() {
                         response.request_focus();
                     }
