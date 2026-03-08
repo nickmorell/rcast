@@ -47,6 +47,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     tx.commit()
 }
 
+#[allow(dead_code)]
 pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
     let tx = conn.transaction()?;
 
@@ -85,6 +86,7 @@ pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
     tx.commit()
 }
 
+#[allow(dead_code)]
 pub fn rollback_n(conn: &mut Connection, count: usize) -> Result<()> {
     let tx = conn.transaction()?;
 
@@ -93,6 +95,7 @@ pub fn rollback_n(conn: &mut Connection, count: usize) -> Result<()> {
         &versions::add_episode_unique_index::AddEpisodeUniqueIndex,
         &versions::add_episode_position::AddEpisodePosition,
         &versions::add_podcast_last_synced_at::AddPodcastLastSyncedAt,
+        &versions::create_bookmarks_table::CreateBookmarksTable,
     ];
 
     let limit: i64 = count as i64;

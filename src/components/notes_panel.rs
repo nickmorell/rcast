@@ -9,7 +9,6 @@ use crate::db::models::Bookmark;
 
 const BG: Color32 = Color32::from_rgb(22, 22, 26);
 const SURFACE: Color32 = Color32::from_rgb(32, 32, 38);
-const SURFACE_HOVER: Color32 = Color32::from_rgb(42, 42, 50);
 const MUTED: Color32 = Color32::from_rgb(130, 130, 140);
 const TIMESTAMP_BG: Color32 = Color32::from_rgb(45, 65, 110);
 const TIMESTAMP_FG: Color32 = Color32::from_rgb(140, 180, 255);
@@ -280,9 +279,17 @@ impl NotesPanel {
         } else {
             SURFACE
         };
+        let hover_fill = if is_podcast_note {
+            Color32::from_rgb(52, 50, 75)
+        } else {
+            Color32::from_rgb(42, 42, 50)
+        };
+
+        let is_hovered = ui.rect_contains_pointer(ui.cursor().expand(200.0));
+        let frame_fill = if is_hovered { hover_fill } else { base_fill };
 
         let note_rect = egui::Frame::new()
-            .fill(base_fill)
+            .fill(frame_fill)
             .inner_margin(egui::Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -381,7 +388,6 @@ impl NotesPanel {
                         if let Some(pos) = bookmark.position_seconds {
                             let resp = timestamp_badge(ui, pos);
                             if resp.clicked() {
-                                println!("Seeking to {} seconds", pos);
                                 self.seek_request = Some(Duration::from_secs_f64(pos));
                             }
                             resp.on_hover_text("Click to seek");

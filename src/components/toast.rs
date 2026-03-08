@@ -72,7 +72,7 @@ pub fn render(ctx: &Context, queue: &mut ToastQueue) {
     // Keep repainting so toasts disappear on time even when idle.
     ctx.request_repaint();
 
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let mut y_offset = screen.max.y - 12.0;
 
     for toast in queue.toasts.iter().rev() {
@@ -102,10 +102,10 @@ pub fn render(ctx: &Context, queue: &mut ToastQueue) {
         egui::Area::new(format!("toast_{}", toast.text).into())
             .fixed_pos(rect.min)
             .show(ctx, |ui| {
-                egui::Frame::none()
+                egui::Frame::new()
                     .fill(bg_color)
-                    .rounding(egui::Rounding::same(6.0 as u8))
-                    .inner_margin(egui::Margin::symmetric(12.0 as i8, 8.0 as i8))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.colored_label(egui::Color32::WHITE, &toast.text);
                     });

@@ -215,7 +215,6 @@ impl RCast {
         }
     }
 
-    // Poll the audio player every frame to handle autoplay and track state.
     fn poll_audio(&mut self) {
         // Autoplay next in queue when the current track finishes.
         if self.audio_player.is_finished()
@@ -252,7 +251,7 @@ impl eframe::App for RCast {
             self.state.open_add_podcast_requested = false;
         }
 
-        // Handle notes panel open requests (from detail page or media controls)
+        // Handle notes panel open requests
         if let Some((episode_id, podcast_id, title)) = self.state.notes_open_request.take() {
             let changed = self.notes_panel.open(episode_id, podcast_id, title);
             if changed {
@@ -315,7 +314,6 @@ impl eframe::App for RCast {
             .show(ctx, |ui| {
                 ui.add_space(5.0);
 
-                // Determine the current podcast's image URL for the controls.
                 let current_podcast_image = self.state.now_playing.as_ref().and_then(|np| {
                     self.state
                         .podcasts
@@ -331,11 +329,7 @@ impl eframe::App for RCast {
                         .iter()
                         .find(|e| e.id == np.episode_id)
                         .cloned()
-                        .or_else(|| {
-                            // If the detail page isn't loaded, we don't have the episode
-                            // object handy. Audio still plays; the title is just blank.
-                            None
-                        })
+                        .or_else(|| None)
                 });
 
                 let current_podcast_title = self.state.now_playing.as_ref().and_then(|np| {
@@ -400,7 +394,6 @@ impl eframe::App for RCast {
                     MediaControlsAction::VolumeChanged(vol) => {
                         self.audio_player.set_volume(vol);
                         self.state.settings.default_volume = vol;
-                        volume = vol;
                     }
                     MediaControlsAction::SetSpeed(speed) => {
                         self.audio_player.set_speed(speed);
