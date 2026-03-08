@@ -1,4 +1,4 @@
-use egui::{Popup, Ui};
+use egui::Ui;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
@@ -216,47 +216,36 @@ impl PodcastDetailPage {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    let menu_id = egui::Id::new(format!("ctx_menu_{}", ep_id));
                                     let menu_btn = ui.button(
                                         egui::RichText::new(egui_phosphor::regular::DOTS_THREE)
                                             .size(16.0),
                                     );
 
-                                    if menu_btn.clicked() {
-                                        Popup::toggle_id(ui.ctx(), menu_id);
-                                    }
+                                    egui::Popup::menu(&menu_btn).show(|ui: &mut egui::Ui| {
+                                        ui.set_min_width(150.0);
 
-                                    Popup::from_response(&menu_btn)
-                                        .close_behavior(
-                                            egui::PopupCloseBehavior::CloseOnClickOutside,
-                                        )
-                                        .show(|ui: &mut egui::Ui| {
-                                            ui.set_min_width(150.0);
+                                        if ui
+                                            .button(if episode.is_played {
+                                                "Mark Unplayed"
+                                            } else {
+                                                "Mark Played"
+                                            })
+                                            .clicked()
+                                        {
+                                            let _ = cmd_tx.send(AppCommand::TogglePlayed(ep_id));
+                                            ui.close();
+                                        }
 
-                                            if ui
-                                                .button(if episode.is_played {
-                                                    "Mark Unplayed"
-                                                } else {
-                                                    "Mark Played"
-                                                })
-                                                .clicked()
-                                            {
-                                                let _ =
-                                                    cmd_tx.send(AppCommand::TogglePlayed(ep_id));
-                                                Popup::close_id(ui.ctx(), menu_id);
-                                            }
+                                        if ui.button("Add to Queue").clicked() {
+                                            let _ = cmd_tx.send(AppCommand::AddToQueue(ep_id));
+                                            ui.close();
+                                        }
 
-                                            if ui.button("Add to Queue").clicked() {
-                                                let _ = cmd_tx.send(AppCommand::AddToQueue(ep_id));
-                                                Popup::close_id(ui.ctx(), menu_id);
-                                            }
-
-                                            if ui.button("Download").clicked() {
-                                                let _ =
-                                                    cmd_tx.send(AppCommand::DownloadEpisode(ep_id));
-                                                Popup::close_id(ui.ctx(), menu_id);
-                                            }
-                                        });
+                                        if ui.button("Download").clicked() {
+                                            let _ = cmd_tx.send(AppCommand::DownloadEpisode(ep_id));
+                                            ui.close();
+                                        }
+                                    });
 
                                     ui.add_space(10.0);
                                     ui.label(

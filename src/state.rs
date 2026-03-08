@@ -20,6 +20,7 @@ pub struct AppState {
 
     // Playback
     pub now_playing: Option<NowPlaying>,
+    pub now_playing_episode: Option<Episode>,
 
     // Queue
     pub queue_display: Vec<QueueDisplayItem>,
@@ -52,6 +53,7 @@ impl Default for AppState {
             detail_podcast: None,
             detail_episodes: Vec::new(),
             now_playing: None,
+            now_playing_episode: None,
             queue_display: Vec::new(),
             settings: Settings::default(),
             image_cache: ImageCache::new(),

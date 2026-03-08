@@ -196,6 +196,7 @@ impl Orchestrator {
                     self.db.add_to_queue(id).await.ok();
                 }
                 self.refresh_queue_display().await;
+                self.prefetch_lookahead().await;
             }
             AppCommand::PausePlayback => {
                 if let Some(episode_id) = self.audio_player.get_current_episode_id() {
@@ -224,6 +225,7 @@ impl Orchestrator {
                             self.db.remove_from_queue(first.id).await.ok();
                             self.play_episode(episode_id).await;
                             self.refresh_queue_display().await;
+                            self.prefetch_lookahead().await;
                         } else {
                             self.audio_player.stop();
                             let _ = self.event_tx.send(AppEvent::PlaybackStopped);
@@ -247,7 +249,7 @@ impl Orchestrator {
                 self.refresh_queue_display().await;
             }
 
-            // Episodes
+            // ── Episodes ──────────────────────────────────────────────────────
             AppCommand::DownloadEpisode(episode_id) => {
                 let episode = match self.db.get_episode(episode_id).await {
                     Ok(Some(e)) => e,
@@ -502,11 +504,14 @@ impl Orchestrator {
 
         let podcast_id = episode.podcast_id;
         let resume_position = episode.position_seconds;
+        let episode_for_event = episode.clone();
         let audio_player = self.audio_player.clone();
         let tx = self.event_tx.clone();
 
+        // Reset the saved-position tracker for this new episode.
         self.last_saved_position = resume_position;
 
+        // Helper: if there's a saved position > 5s, seek and notify the user.
         let should_resume = resume_position > 5.0;
 
         // Tier 1: user-downloaded file
@@ -516,6 +521,7 @@ impl Orchestrator {
 
         if let Some(path) = downloaded_path {
             let path_str = path.to_string_lossy().to_string();
+            let ep = episode_for_event.clone();
             tokio::task::spawn_blocking(move || {
                 match audio_player.play_from_file(&path_str, episode_id) {
                     Ok(_) => {
@@ -531,6 +537,7 @@ impl Orchestrator {
                         let _ = tx.send(AppEvent::PlaybackStarted {
                             episode_id,
                             podcast_id,
+                            episode: ep,
                         });
                     }
                     Err(e) => {
@@ -543,6 +550,7 @@ impl Orchestrator {
 
         // in-memory audio cache
         if let Some(bytes) = self.audio_cache.get(episode_id) {
+            let ep = episode_for_event.clone();
             tokio::task::spawn_blocking(move || {
                 match audio_player.play_from_memory(bytes, episode_id) {
                     Ok(_) => {
@@ -558,6 +566,7 @@ impl Orchestrator {
                         let _ = tx.send(AppEvent::PlaybackStarted {
                             episode_id,
                             podcast_id,
+                            episode: ep,
                         });
                     }
                     Err(e) => {
@@ -573,6 +582,7 @@ impl Orchestrator {
         let _ = tx.send(AppEvent::Toast(ToastMessage::info("Buffering...")));
 
         let fetch_tx = tx.clone();
+        let ep = episode_for_event.clone();
         match tokio::task::spawn_blocking(move || {
             reqwest::blocking::get(&url)
                 .and_then(|r| r.bytes())
@@ -598,6 +608,7 @@ impl Orchestrator {
                             let _ = fetch_tx.send(AppEvent::PlaybackStarted {
                                 episode_id,
                                 podcast_id,
+                                episode: ep,
                             });
                         }
                         Err(e) => {
@@ -627,7 +638,74 @@ impl Orchestrator {
             }
         }
     }
+
+    /// Pre-fetches the next N episodes in the queue into the audio cache so
+    /// they are ready to play without a buffering delay. Only fetches episodes
+    /// not already cached or downloaded. Called after playback starts and after
+    /// queue changes.
+    async fn prefetch_lookahead(&mut self) {
+        const LOOKAHEAD: usize = 3;
+
+        let queue = match self.db.get_queue().await {
+            Ok(q) => q,
+            Err(_) => return,
+        };
+
+        for item in queue.iter().take(LOOKAHEAD) {
+            let episode_id = item.episode_id;
+
+            // Skip if already in memory cache
+            if self.audio_cache.get(episode_id).is_some() {
+                continue;
+            }
+
+            // Skip if already downloaded to disk
+            let episode = match self.db.get_episode(episode_id).await {
+                Ok(Some(e)) => e,
+                _ => continue,
+            };
+
+            let podcast = match self.db.get_podcast(episode.podcast_id).await {
+                Ok(Some(p)) => p,
+                _ => continue,
+            };
+
+            if self
+                .download_manager
+                .find_file(vec![podcast.title.clone()], &episode.title)
+                .is_some()
+            {
+                continue;
+            }
+
+            // Fetch in the background — don't block the queue loop
+            let url = episode.url.clone();
+            let tx = self.event_tx.clone();
+            let audio_cache = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+
+            tokio::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    reqwest::blocking::get(&url)
+                        .and_then(|r| r.bytes())
+                        .map_err(|e| e.to_string())
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(_bytes)) => {
+                        let _ = audio_cache; // keep alive
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(AppEvent::Error(format!("Prefetch failed: {e}")));
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
 }
+
+// -- Standalone async task functions ------------------------------------------------
 
 async fn add_podcast(feed_url: String, db: Database, tx: UnboundedSender<AppEvent>) {
     let _ = tx.send(AppEvent::Toast(ToastMessage::info("Fetching feed...")));

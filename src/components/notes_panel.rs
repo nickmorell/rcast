@@ -114,7 +114,11 @@ impl NotesPanel {
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                                 if ui
-                                    .button(RichText::new("✕").size(14.0).color(MUTED))
+                                    .button(
+                                        RichText::new(egui_phosphor::regular::X)
+                                            .size(14.0)
+                                            .color(MUTED),
+                                    )
                                     .clicked()
                                 {
                                     self.visible = false;
@@ -405,14 +409,14 @@ impl NotesPanel {
                         );
 
                         let icon_color = if currently_hovered {
-                            MUTED
+                            Color32::from_rgb(200, 200, 210)
                         } else {
-                            Color32::from_rgb(50, 50, 58)
+                            Color32::from_rgb(100, 100, 115)
                         };
                         let delete_color = if currently_hovered {
                             DELETE_RED
                         } else {
-                            Color32::from_rgb(50, 50, 58)
+                            Color32::from_rgb(100, 100, 115)
                         };
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

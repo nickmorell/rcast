@@ -122,14 +122,17 @@ impl RCast {
             AppEvent::PlaybackStarted {
                 episode_id,
                 podcast_id,
+                episode,
             } => {
                 self.state.now_playing = Some(crate::state::NowPlaying {
                     episode_id,
                     podcast_id,
                 });
+                self.state.now_playing_episode = Some(episode);
             }
             AppEvent::PlaybackStopped => {
                 self.state.now_playing = None;
+                self.state.now_playing_episode = None;
             }
 
             // Settings
@@ -322,15 +325,7 @@ impl eframe::App for RCast {
                         .map(|p| p.image_url.clone())
                 });
 
-                // Find the current episode and its podcast title.
-                let current_episode = self.state.now_playing.as_ref().and_then(|np| {
-                    self.state
-                        .detail_episodes
-                        .iter()
-                        .find(|e| e.id == np.episode_id)
-                        .cloned()
-                        .or_else(|| None)
-                });
+                let current_episode = self.state.now_playing_episode.clone();
 
                 let current_podcast_title = self.state.now_playing.as_ref().and_then(|np| {
                     self.state

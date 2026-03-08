@@ -29,7 +29,7 @@ pub fn render(ctx: &Context, cmd_tx: &UnboundedSender<AppCommand>) -> bool {
 
             ui.menu_button("About", |ui| {
                 ui.label("RCast - Podcast Player");
-                ui.label("Version 0.1.1");
+                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
             });
         });
     });

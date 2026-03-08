@@ -114,6 +114,21 @@ impl SettingsPage {
 
         ui.vertical(|ui| {
             ui.add_space(20.0);
+
+            if ui
+                .button(
+                    egui::RichText::new(format!(
+                        "{}  Back",
+                        egui_phosphor::regular::ARROW_LEFT
+                    ))
+                        .size(13.0),
+                )
+                .clicked()
+            {
+                let _ = cmd_tx.send(AppCommand::NavigateTo(self.previous_page.clone()));
+            }
+
+            ui.add_space(12.0);
             ui.heading("Settings");
             ui.add_space(20.0);
 

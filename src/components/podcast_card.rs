@@ -66,25 +66,20 @@ impl<'a> PodcastCard<'a> {
 
             // Playing state glow
             if self.is_playing {
-                // Outer soft glow
-                for (extra, alpha) in [(10.0f32, 30u8), (7.0, 60), (4.0, 120)] {
-                    ui.painter().rect(
-                        paint_rect.expand(extra),
-                        12.0 + extra * 0.5,
-                        Color32::TRANSPARENT,
-                        egui::Stroke::new(
-                            2.0,
-                            Color32::from_rgba_premultiplied(70, 130, 220, alpha),
-                        ),
-                        egui::epaint::StrokeKind::Outside,
-                    );
-                }
+                // Soft outer glow ring
+                ui.painter().rect(
+                    paint_rect.expand(6.0),
+                    12.0,
+                    Color32::TRANSPARENT,
+                    egui::Stroke::new(4.0, Color32::from_rgba_premultiplied(70, 130, 220, 60)),
+                    egui::epaint::StrokeKind::Outside,
+                );
                 // Crisp inner border
                 ui.painter().rect(
                     paint_rect,
                     10.0,
                     Color32::TRANSPARENT,
-                    egui::Stroke::new(2.5, Color32::from_rgb(100, 160, 255)),
+                    egui::Stroke::new(2.0, Color32::from_rgb(100, 160, 255)),
                     egui::epaint::StrokeKind::Outside,
                 );
             }
