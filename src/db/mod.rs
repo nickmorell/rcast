@@ -533,6 +533,16 @@ impl Database {
         .await?
     }
 
+    pub async fn clear_queue(&self) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            conn.execute("DELETE FROM queue", [])?;
+            Ok(())
+        })
+        .await?
+    }
+
     // Settings
 
     pub async fn get_settings(&self) -> anyhow::Result<Settings> {

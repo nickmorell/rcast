@@ -39,7 +39,7 @@ impl RCast {
         file_picker: Arc<dyn FilePicker>,
     ) -> Self {
         let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
-
+        let _ = cmd_tx.send(AppCommand::ClearQueue);
         let mut settings_page = SettingsPage::default();
         settings_page.set_folder_picker(folder_picker);
         settings_page.set_file_picker(file_picker);

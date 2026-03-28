@@ -29,6 +29,7 @@ pub enum AppCommand {
     // -- Queue -----------------------------------------------------------------
     AddToQueue(i32),
     RemoveFromQueue(i32),
+    ClearQueue,
 
     // -- Bookmarks -------------------------------------------------------------
     LoadBookmarks {

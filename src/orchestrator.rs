@@ -248,6 +248,10 @@ impl Orchestrator {
                 self.db.remove_from_queue(queue_id).await.ok();
                 self.refresh_queue_display().await;
             }
+            AppCommand::ClearQueue => {
+                self.db.clear_queue().await.ok();
+                self.refresh_queue_display().await;
+            }
 
             // ── Episodes ──────────────────────────────────────────────────────
             AppCommand::DownloadEpisode(episode_id) => {

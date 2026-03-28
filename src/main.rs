@@ -49,7 +49,7 @@ fn main() -> eframe::Result {
         Orchestrator::new(cmd_rx, event_tx, db, audio_player.clone(), download_manager).run(),
     );
 
-    let folder_picker = Arc::new(RfdFolderPicker::new(tokio_runtime.clone()));
+    let folder_picker: Arc<RfdFolderPicker> = Arc::new(RfdFolderPicker::new(tokio_runtime.clone()));
     let file_picker = Arc::new(RfdFilePicker::new(tokio_runtime.clone()));
 
     eframe::run_native(
