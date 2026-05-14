@@ -242,7 +242,7 @@ impl RCast {
 }
 
 impl eframe::App for RCast {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Drain all pending background events
         while let Ok(event) = self.event_rx.try_recv() {
             self.handle_event(event);
@@ -270,13 +270,17 @@ impl eframe::App for RCast {
         // Poll audio player for autoplay / stop detection
         self.poll_audio();
 
-        // Request repaints while audio is playing so the seek bar stays smooth.
+        // Request repaints while audio is playing so the seek bar stays smooth
         if self.audio_player.get_state() == PlaybackState::Playing {
             ctx.request_repaint();
         }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
 
         // Menu bar
-        if crate::components::menu::render(ctx, &self.cmd_tx) {
+        if crate::components::menu::render(&ctx, &self.cmd_tx) {
             self.add_podcast_modal.open();
         }
 
@@ -285,7 +289,7 @@ impl eframe::App for RCast {
             let now_playing_id = self.state.now_playing.as_ref().map(|np| np.episode_id);
             let current_pos = self.audio_player.get_position().as_secs_f64();
             self.notes_panel.render(
-                ctx,
+                &ctx,
                 &self.state.notes_episode_bookmarks,
                 &self.state.notes_podcast_bookmarks,
                 now_playing_id,
@@ -297,24 +301,10 @@ impl eframe::App for RCast {
             }
         }
 
-        // Active page
-        egui::CentralPanel::default().show(ctx, |ui| match self.current_page.clone() {
-            Page::Home => {
-                self.home_page.render(ui, &mut self.state, &self.cmd_tx);
-            }
-            Page::PodcastDetail(_) => {
-                self.podcast_detail_page
-                    .render(ui, &mut self.state, &self.cmd_tx);
-            }
-            Page::Settings => {
-                self.settings_page.render(ui, &mut self.state, &self.cmd_tx);
-            }
-        });
-
         // Media controls
         egui::TopBottomPanel::bottom("media_controls")
             .min_height(80.0)
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.add_space(5.0);
 
                 let current_podcast_image = self.state.now_playing.as_ref().and_then(|np| {
@@ -358,7 +348,6 @@ impl eframe::App for RCast {
                         if self.notes_panel.visible {
                             self.notes_panel.close();
                         } else if let Some(np) = &self.state.now_playing {
-                            // Open panel for the currently playing episode.
                             let title = self
                                 .state
                                 .detail_episodes
@@ -402,12 +391,26 @@ impl eframe::App for RCast {
                 ui.add_space(5.0);
             });
 
+        // Active page
+        egui::CentralPanel::default().show_inside(ui, |ui| match self.current_page.clone() {
+            Page::Home => {
+                self.home_page.render(ui, &mut self.state, &self.cmd_tx);
+            }
+            Page::PodcastDetail(_) => {
+                self.podcast_detail_page
+                    .render(ui, &mut self.state, &self.cmd_tx);
+            }
+            Page::Settings => {
+                self.settings_page.render(ui, &mut self.state, &self.cmd_tx);
+            }
+        });
+
         // Add Podcast modal
-        if let Some(url) = self.add_podcast_modal.render(ctx) {
+        if let Some(url) = self.add_podcast_modal.render(&ctx) {
             let _ = self.cmd_tx.send(AppCommand::AddPodcast { feed_url: url });
         }
 
         // Toast overlay
-        toast::render(ctx, &mut self.state.toasts);
+        toast::render(&ctx, &mut self.state.toasts);
     }
 }

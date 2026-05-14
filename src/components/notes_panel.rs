@@ -164,7 +164,7 @@ impl NotesPanel {
                                     .hint_text("Write a note… (Shift+Enter for newline)")
                                     .desired_rows(2)
                                     .desired_width(f32::INFINITY)
-                                    .frame(false);
+                                    .frame(egui::Frame::NONE);
 
                                 let response = ui.add(input);
 
@@ -349,8 +349,7 @@ impl NotesPanel {
 
                     let edit_input = egui::TextEdit::multiline(&mut self.edit_text)
                         .desired_rows(2)
-                        .desired_width(f32::INFINITY)
-                        .frame(true);
+                        .desired_width(f32::INFINITY);
 
                     let resp = ui.add(edit_input);
 
