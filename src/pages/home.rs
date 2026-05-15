@@ -179,10 +179,61 @@ impl HomePage {
             let podcast_ids: Vec<i32> = filtered.iter().map(|p| p.id).collect();
             let density = state.settings.home_density;
 
-            egui::ScrollArea::vertical().show(ui, |ui| match density {
-                HomeDensity::Grid => {
-                    ui.add_space(5.0);
-                    ui.horizontal_wrapped(|ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| match density {
+                    HomeDensity::Grid => {
+                        let grid_width = ui.available_width();
+                        const CARD_SIZE: f32 = 200.0;
+                        const CARD_SPACING: f32 = 20.0;
+
+                        let cols = ((grid_width + CARD_SPACING) / (CARD_SIZE + CARD_SPACING))
+                            .floor()
+                            .max(1.0) as usize;
+
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.add_space(5.0);
+                                for row in podcast_ids.chunks(cols) {
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(CARD_SPACING);
+                                        for id in row {
+                                            let Some(podcast) =
+                                                state.podcasts.iter().find(|p| p.id == *id)
+                                            else {
+                                                continue;
+                                            };
+                                            let is_playing = state
+                                                .now_playing
+                                                .as_ref()
+                                                .map(|np| np.podcast_id == podcast.id)
+                                                .unwrap_or(false);
+                                            let is_syncing =
+                                                state.syncing_podcast_ids.contains(&podcast.id);
+
+                                            if PodcastCard::new(
+                                                podcast,
+                                                &state.image_cache,
+                                                is_playing,
+                                                is_syncing,
+                                            )
+                                            .show(ui)
+                                            .clicked()
+                                            {
+                                                let _ = cmd_tx.send(AppCommand::NavigateTo(
+                                                    Page::PodcastDetail(podcast.id),
+                                                ));
+                                            }
+                                            ui.add_space(CARD_SPACING);
+                                        }
+                                    });
+                                    ui.add_space(CARD_SPACING);
+                                }
+                            });
+                    }
+                    HomeDensity::List => {
+                        ui.set_width(ui.available_width());
                         for id in &podcast_ids {
                             let Some(podcast) = state.podcasts.iter().find(|p| p.id == *id) else {
                                 continue;
@@ -193,45 +244,22 @@ impl HomePage {
                                 .map(|np| np.podcast_id == podcast.id)
                                 .unwrap_or(false);
                             let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
-                            ui.add_space(10.0);
-                            if PodcastCard::new(podcast, &state.image_cache, is_playing, is_syncing)
-                                .show(ui)
-                                .clicked()
-                            {
+
+                            if render_podcast_row(
+                                ui,
+                                podcast,
+                                is_playing,
+                                is_syncing,
+                                &state.image_cache,
+                            ) {
                                 let _ = cmd_tx
                                     .send(AppCommand::NavigateTo(Page::PodcastDetail(podcast.id)));
                             }
-                        }
-                    });
-                }
-                HomeDensity::List => {
-                    ui.set_width(ui.available_width());
-                    for id in &podcast_ids {
-                        let Some(podcast) = state.podcasts.iter().find(|p| p.id == *id) else {
-                            continue;
-                        };
-                        let is_playing = state
-                            .now_playing
-                            .as_ref()
-                            .map(|np| np.podcast_id == podcast.id)
-                            .unwrap_or(false);
-                        let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
 
-                        if render_podcast_row(
-                            ui,
-                            podcast,
-                            is_playing,
-                            is_syncing,
-                            &state.image_cache,
-                        ) {
-                            let _ = cmd_tx
-                                .send(AppCommand::NavigateTo(Page::PodcastDetail(podcast.id)));
+                            ui.separator();
                         }
-
-                        ui.separator();
                     }
-                }
-            });
+                });
         });
     }
 }
