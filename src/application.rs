@@ -1,4 +1,3 @@
-use egui::Context;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -302,8 +301,8 @@ impl eframe::App for RCast {
         }
 
         // Media controls
-        egui::TopBottomPanel::bottom("media_controls")
-            .min_height(80.0)
+        egui::Panel::bottom("media_controls")
+            .min_size(80.0)
             .show_inside(ui, |ui| {
                 ui.add_space(5.0);
 
