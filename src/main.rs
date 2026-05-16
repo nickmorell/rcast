@@ -10,12 +10,16 @@ mod db;
 mod download_manager;
 mod errors;
 mod events;
+mod hotkeys;
 mod image_cache;
 mod migrations;
+mod notifier;
 mod orchestrator;
 mod pages;
 mod ports;
 mod state;
+mod tray;
+mod trim_silence;
 mod types;
 mod utils;
 
@@ -25,10 +29,12 @@ use application::RCast;
 use audio_player::AudioPlayer;
 use db::Database;
 use download_manager::DownloadManager;
+use hotkeys::HotkeyManager;
 use orchestrator::Orchestrator;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use tray::AppTray;
 
 fn main() -> eframe::Result {
     let tokio_runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
@@ -61,12 +67,20 @@ fn main() -> eframe::Result {
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
 
+            // System tray — failure is non-fatal (may not be supported on all platforms/configs).
+            let tray = AppTray::new().ok();
+
+            // Global hotkeys — failure is non-fatal.
+            let hotkeys = HotkeyManager::new().ok();
+
             Ok(Box::new(RCast::new(
                 cmd_tx,
                 event_rx,
                 audio_player,
                 folder_picker,
                 file_picker,
+                tray,
+                hotkeys,
             )))
         }),
     )

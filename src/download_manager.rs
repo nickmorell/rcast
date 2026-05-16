@@ -23,8 +23,7 @@ impl DownloadManager {
         self.find_file(folders, file_name).is_some()
     }
 
-    // Returns the full path of a downloaded file if it exists, or `None`.
-    pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<std::path::PathBuf> {
+    pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<PathBuf> {
         let download_path = self.database.get_download_directory_sync().ok()?;
         let download_dir = construct_download_path(download_path, folders);
 
@@ -42,12 +41,13 @@ impl DownloadManager {
         None
     }
 
+    /// Downloads the file and returns the path where it was saved.
     pub fn download(
         &self,
         url: String,
         folders: Vec<String>,
         file_name: String,
-    ) -> Result<(), String> {
+    ) -> Result<PathBuf, String> {
         let download_path = self
             .database
             .get_download_directory_sync()
@@ -99,7 +99,11 @@ impl DownloadManager {
 
         fs::write(&download_dir, &bytes).map_err(|_| "Failed to write file".to_string())?;
 
-        Ok(())
+        Ok(download_dir)
+    }
+
+    pub fn delete_file(&self, path: &str) -> Result<(), String> {
+        fs::remove_file(path).map_err(|e| e.to_string())
     }
 }
 

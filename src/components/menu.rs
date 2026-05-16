@@ -1,14 +1,13 @@
-use egui::Context;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
 use crate::types::Page;
 
 /// Returns `true` if the user clicked "Add Podcast" this frame.
-pub fn render(ctx: &Context, cmd_tx: &UnboundedSender<AppCommand>) -> bool {
+pub fn render(ui: &mut egui::Ui, cmd_tx: &UnboundedSender<AppCommand>) -> bool {
     let mut open_add_podcast = false;
 
-    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+    egui::Panel::top("menu_bar").show_inside(ui, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Add Podcast").clicked() {
@@ -23,7 +22,7 @@ pub fn render(ctx: &Context, cmd_tx: &UnboundedSender<AppCommand>) -> bool {
                 ui.separator();
 
                 if ui.button("Quit").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
 

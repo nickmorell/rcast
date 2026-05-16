@@ -212,6 +212,22 @@ impl MediaControls {
                                                     *show_speed_menu = false;
                                                 }
                                             }
+                                            if current_episode.is_some() {
+                                                ui.separator();
+                                                if ui
+                                                    .button("Set as show default")
+                                                    .on_hover_text(
+                                                        "Save current speed as the default for this podcast",
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action =
+                                                        MediaControlsAction::SetShowDefaultSpeed(
+                                                            speed,
+                                                        );
+                                                    *show_speed_menu = false;
+                                                }
+                                            }
                                         });
                                     });
                                 });
@@ -381,6 +397,7 @@ pub enum MediaControlsAction {
     Seek(Duration),
     VolumeChanged(f32),
     SetSpeed(f32),
+    SetShowDefaultSpeed(f32),
     RemoveFromQueue(i32),
     ToggleNotes,
 }

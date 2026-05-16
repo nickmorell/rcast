@@ -35,3 +35,7 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync", "macros", "
 bytes = "1.11.1"
 anyhow = "1.0.102"
 quick-xml = { version = "0.40.0", features = ["serialize"] }
+global-hotkey = "0.6"
+tray-icon = "0.19"
+muda = "0.15"
+notify-rust = "4"

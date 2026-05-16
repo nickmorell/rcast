@@ -1,5 +1,34 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum DownloadStatus {
+    #[default]
+    NotDownloaded,
+    Downloading,
+    Downloaded,
+    Failed,
+}
+
+impl DownloadStatus {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "downloading" => Self::Downloading,
+            "downloaded" => Self::Downloaded,
+            "failed" => Self::Failed,
+            _ => Self::NotDownloaded,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotDownloaded => "not_downloaded",
+            Self::Downloading => "downloading",
+            Self::Downloaded => "downloaded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Podcast {
     pub id: i32,
@@ -11,6 +40,12 @@ pub struct Podcast {
     pub last_synced_at: i64, // 0 means never synced
     pub created_at: i64,
     pub updated_at: i64,
+    // Per-show preferences (None = inherit global)
+    pub speed_preset: Option<f32>,
+    pub auto_download: Option<bool>,
+    pub keep_episodes_count: Option<i32>,
+    pub skip_intro_seconds: i32,
+    pub skip_outro_seconds: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +62,10 @@ pub struct Episode {
     pub position_seconds: f64,
     pub created_at: i64,
     pub updated_at: i64,
+    // Download tracking
+    pub download_status: DownloadStatus,
+    pub downloaded_path: Option<String>,
+    pub speed_preset: Option<f32>,
 }
 
 /** A user-created note, optionally tied to a timestamp.

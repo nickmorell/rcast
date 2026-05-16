@@ -1,6 +1,6 @@
 use crate::components::toast::ToastMessage;
-use crate::db::models::{Episode, Podcast};
-use crate::types::{Page, QueueDisplayItem, Settings};
+use crate::db::models::{DownloadStatus, Episode, Podcast};
+use crate::types::{Page, PodcastPreferences, QueueDisplayItem, Settings};
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -21,6 +21,17 @@ pub enum AppEvent {
     },
     SyncStarted(i32),
     SyncCompleted(i32),
+    PodcastPreferencesUpdated {
+        podcast_id: i32,
+        prefs: PodcastPreferences,
+    },
+
+    // Downloads
+    DownloadStatusChanged {
+        episode_id: i32,
+        status: DownloadStatus,
+        path: Option<String>,
+    },
 
     // Queue
     QueueUpdated(Vec<QueueDisplayItem>),
@@ -52,7 +63,6 @@ pub enum AppEvent {
         skipped: usize,
         failed: usize,
     },
-    // Fired after an OPML export completes.
     OpmlExported {
         path: String,
     },
