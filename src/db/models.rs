@@ -66,6 +66,8 @@ pub struct Episode {
     pub download_status: DownloadStatus,
     pub downloaded_path: Option<String>,
     pub speed_preset: Option<f32>,
+    // Chapter support (Podcasting 2.0 namespace)
+    pub chapters_url: Option<String>,
 }
 
 /** A user-created note, optionally tied to a timestamp.

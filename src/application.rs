@@ -178,10 +178,16 @@ impl RCast {
                     podcast_id,
                 });
                 self.state.now_playing_episode = Some(episode);
+                self.state.now_playing_chapters.clear();
+                self.home_page.show_chapters = false;
             }
             AppEvent::PlaybackStopped => {
                 self.state.now_playing = None;
                 self.state.now_playing_episode = None;
+                self.state.now_playing_chapters.clear();
+            }
+            AppEvent::ChaptersLoaded(chapters) => {
+                self.state.now_playing_chapters = chapters;
             }
 
             // Settings
@@ -316,7 +322,8 @@ impl eframe::App for RCast {
 
         // Poll global hotkey events
         if let Some(hk) = &self.hotkeys {
-            hk.poll(&self.cmd_tx);
+            let focused = ctx.input(|i| i.focused);
+            hk.poll(&self.cmd_tx, focused);
         }
 
         // Check if any page requested the Add Podcast modal
@@ -413,9 +420,11 @@ impl eframe::App for RCast {
                     current_episode.as_ref(),
                     current_podcast_title.as_deref(),
                     current_podcast_image.as_deref(),
+                    &self.state.now_playing_chapters,
                     &mut volume,
                     &mut self.home_page.show_queue,
                     &mut self.home_page.show_speed_menu,
+                    &mut self.home_page.show_chapters,
                     self.notes_panel.visible,
                 );
 

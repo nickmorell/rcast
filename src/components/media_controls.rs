@@ -1,5 +1,6 @@
 use crate::{
     audio_player::AudioPlayer,
+    chapters::{current_chapter, Chapter},
     db::models::Episode,
     image_cache::ImageCache,
     types::{QueueDisplayItem, Settings},
@@ -20,9 +21,11 @@ impl MediaControls {
         current_episode: Option<&Episode>,
         current_podcast_title: Option<&str>,
         current_podcast_image: Option<&str>,
+        chapters: &[Chapter],
         volume: &mut f32,
         show_queue: &mut bool,
         show_speed_menu: &mut bool,
+        show_chapters: &mut bool,
         notes_open: bool,
     ) -> MediaControlsAction {
         let mut action = MediaControlsAction::None;
@@ -72,6 +75,28 @@ impl MediaControls {
                                     episode.title.clone()
                                 };
                                 ui.label(egui::RichText::new(title).size(14.0).strong());
+                            }
+
+                            if !chapters.is_empty() {
+                                let pos_secs = audio_player.get_position().as_secs_f64();
+                                if let Some(ch) = current_chapter(chapters, pos_secs) {
+                                    let ch_name = if ch.title.len() > 28 {
+                                        let end = ch
+                                            .title
+                                            .char_indices()
+                                            .nth(25)
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(ch.title.len());
+                                        format!("{}...", &ch.title[..end])
+                                    } else {
+                                        ch.title.clone()
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(format!("◆ {}", ch_name))
+                                            .size(11.0)
+                                            .color(Color32::from_rgb(140, 180, 255)),
+                                    );
+                                }
                             }
                         });
                     }
@@ -238,6 +263,93 @@ impl MediaControls {
                                     && !speed_btn.rect.contains(pos)
                                 {
                                     *show_speed_menu = false;
+                                }
+                            }
+                        }
+                    }
+
+                    ui.add_space(5.0);
+
+                    let has_chapters = !chapters.is_empty();
+                    let chapters_icon = egui::RichText::new(egui_phosphor::regular::LIST_BULLETS)
+                        .size(20.0)
+                        .color(if has_chapters {
+                            ui.visuals().text_color()
+                        } else {
+                            ui.visuals().text_color().gamma_multiply(0.35)
+                        });
+                    let chapters_btn = ui
+                        .add_enabled(has_chapters, egui::Button::new(chapters_icon))
+                        .on_hover_text("Chapters");
+                    if chapters_btn.clicked() {
+                        *show_chapters = !*show_chapters;
+                    }
+
+                    if *show_chapters && has_chapters {
+                        let pos_secs = audio_player.get_position().as_secs_f64();
+                        let area_response =
+                            egui::Area::new(egui::Id::new("chapters_menu"))
+                                .fixed_pos(chapters_btn.rect.left_top() - egui::vec2(0.0, 10.0))
+                                .pivot(egui::Align2::LEFT_BOTTOM)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_width(300.0);
+                                        ui.set_max_height(350.0);
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            for ch in chapters {
+                                                if !ch.toc {
+                                                    continue;
+                                                }
+                                                let is_current = current_chapter(chapters, pos_secs)
+                                                    .map(|c| std::ptr::eq(c, ch))
+                                                    .unwrap_or(false);
+                                                let start = std::time::Duration::from_secs_f64(ch.start_time);
+                                                let time_str = format_duration(start);
+                                                let row = ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(&time_str)
+                                                            .size(11.0)
+                                                            .color(Color32::from_rgb(160, 160, 160)),
+                                                    );
+                                                    ui.add_space(6.0);
+                                                    let label = egui::RichText::new(&ch.title)
+                                                        .size(13.0)
+                                                        .strong();
+                                                    let label = if is_current {
+                                                        label.color(Color32::from_rgb(140, 180, 255))
+                                                    } else {
+                                                        label
+                                                    };
+                                                    ui.label(label);
+                                                    if is_current {
+                                                        ui.with_layout(
+                                                            egui::Layout::right_to_left(egui::Align::Center),
+                                                            |ui| {
+                                                                ui.label(
+                                                                    egui::RichText::new("✓")
+                                                                        .size(12.0)
+                                                                        .color(Color32::from_rgb(140, 180, 255)),
+                                                                );
+                                                            },
+                                                        );
+                                                    }
+                                                });
+                                                if row.response.interact(egui::Sense::click()).clicked() {
+                                                    action = MediaControlsAction::Seek(start);
+                                                    *show_chapters = false;
+                                                }
+                                                ui.separator();
+                                            }
+                                        });
+                                    });
+                                });
+
+                        if ui.input(|i| i.pointer.any_click()) {
+                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                if !area_response.response.rect.contains(pos)
+                                    && !chapters_btn.rect.contains(pos)
+                                {
+                                    *show_chapters = false;
                                 }
                             }
                         }

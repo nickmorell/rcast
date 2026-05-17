@@ -12,6 +12,7 @@ pub struct HomePage {
     sort_order: SortOrder,
     pub show_queue: bool,
     pub show_speed_menu: bool,
+    pub show_chapters: bool,
 }
 
 impl Default for HomePage {
@@ -21,6 +22,7 @@ impl Default for HomePage {
             sort_order: SortOrder::AToZ,
             show_queue: false,
             show_speed_menu: false,
+            show_chapters: false,
         }
     }
 }

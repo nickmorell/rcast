@@ -1,4 +1,3 @@
-use bytes;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::audio_cache::AudioCache;
@@ -37,7 +36,7 @@ impl Orchestrator {
             event_tx,
             db,
             audio_player,
-            audio_cache: AudioCache::new(10),
+            audio_cache: AudioCache::new(2),
             download_manager,
             current_detail_podcast_id: None,
             last_saved_position: 0.0,
@@ -177,19 +176,29 @@ impl Orchestrator {
                     add_podcast(feed_url, db, tx).await;
                 });
             }
-            AppCommand::RemovePodcast(id) => match self.db.delete_podcast(id).await {
-                Ok(_) => {
-                    let _ = self.event_tx.send(AppEvent::PodcastRemoved(id));
-                    let _ = self
-                        .event_tx
-                        .send(AppEvent::Toast(ToastMessage::success("Podcast removed")));
+            AppCommand::RemovePodcast(id) => {
+                // Delete downloaded episode files before removing the DB record.
+                if let Ok(downloaded) = self.db.get_downloaded_episodes(id).await {
+                    for ep in downloaded {
+                        if let Some(path) = ep.downloaded_path {
+                            let _ = self.download_manager.delete_file(&path);
+                        }
+                    }
                 }
-                Err(e) => {
-                    let _ = self
-                        .event_tx
-                        .send(AppEvent::Error(format!("Failed to remove podcast: {e}")));
+                match self.db.delete_podcast(id).await {
+                    Ok(_) => {
+                        let _ = self.event_tx.send(AppEvent::PodcastRemoved(id));
+                        let _ = self
+                            .event_tx
+                            .send(AppEvent::Toast(ToastMessage::success("Podcast removed")));
+                    }
+                    Err(e) => {
+                        let _ = self
+                            .event_tx
+                            .send(AppEvent::Error(format!("Failed to remove podcast: {e}")));
+                    }
                 }
-            },
+            }
             AppCommand::SyncPodcast(id) => {
                 let tx = self.event_tx.clone();
                 let db = self.db.clone();
@@ -424,7 +433,6 @@ impl Orchestrator {
                     self.db.add_to_queue(id).await.ok();
                 }
                 self.refresh_queue_display().await;
-                self.prefetch_lookahead().await;
             }
             AppCommand::PausePlayback => {
                 if let Some(episode_id) = self.audio_player.get_current_episode_id() {
@@ -485,7 +493,6 @@ impl Orchestrator {
                             self.db.remove_from_queue(first.id).await.ok();
                             self.play_episode(episode_id).await;
                             self.refresh_queue_display().await;
-                            self.prefetch_lookahead().await;
                         } else {
                             self.audio_player.stop();
                             let _ = self.event_tx.send(AppEvent::PlaybackStopped);
@@ -714,6 +721,16 @@ impl Orchestrator {
         let audio_player = self.audio_player.clone();
         let tx = self.event_tx.clone();
 
+        // Fetch chapters concurrently if this episode has a chapters URL.
+        if let Some(chapters_url) = episode.chapters_url.clone() {
+            let chapter_tx = tx.clone();
+            tokio::spawn(async move {
+                if let Ok(chapters) = crate::chapters::fetch_chapters(&chapters_url).await {
+                    let _ = chapter_tx.send(AppEvent::ChaptersLoaded(chapters));
+                }
+            });
+        }
+
         // Resolve playback speed: episode → podcast → global default.
         let speed = episode
             .speed_preset
@@ -929,63 +946,6 @@ impl Orchestrator {
         }
     }
 
-    async fn prefetch_lookahead(&mut self) {
-        const LOOKAHEAD: usize = 3;
-
-        let queue = match self.db.get_queue().await {
-            Ok(q) => q,
-            Err(_) => return,
-        };
-
-        for item in queue.iter().take(LOOKAHEAD) {
-            let episode_id = item.episode_id;
-
-            if self.audio_cache.get(episode_id).is_some() {
-                continue;
-            }
-
-            let episode = match self.db.get_episode(episode_id).await {
-                Ok(Some(e)) => e,
-                _ => continue,
-            };
-
-            // Skip if already downloaded.
-            if episode.download_status == DownloadStatus::Downloaded
-                && episode.downloaded_path.as_deref().map(std::path::Path::new).is_some_and(|p| p.exists())
-            {
-                continue;
-            }
-
-            let podcast = match self.db.get_podcast(episode.podcast_id).await {
-                Ok(Some(p)) => p,
-                _ => continue,
-            };
-
-            if self
-                .download_manager
-                .find_file(vec![podcast.title.clone()], &episode.title)
-                .is_some()
-            {
-                continue;
-            }
-
-            let url = episode.url.clone();
-            let tx = self.event_tx.clone();
-
-            tokio::spawn(async move {
-                let result = tokio::task::spawn_blocking(move || {
-                    reqwest::blocking::get(&url)
-                        .and_then(|r| r.bytes())
-                        .map_err(|e| e.to_string())
-                })
-                .await;
-
-                if let Ok(Err(e)) = result {
-                    let _ = tx.send(AppEvent::Error(format!("Prefetch failed: {e}")));
-                }
-            });
-        }
-    }
 }
 
 // -- Standalone async helpers ---------------------------------------------------
@@ -1232,6 +1192,12 @@ async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Ep
     let image_url = channel
         .image()
         .map(|i| i.url().to_string())
+        .or_else(|| {
+            channel
+                .itunes_ext()
+                .and_then(|e| e.image())
+                .map(|u| u.to_string())
+        })
         .unwrap_or_default();
 
     let now = chrono::Utc::now().timestamp();
@@ -1265,6 +1231,14 @@ async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Ep
                 })
                 .unwrap_or(0);
 
+            let chapters_url = item
+                .extensions()
+                .get("podcast")
+                .and_then(|ns| ns.get("chapters"))
+                .and_then(|v| v.first())
+                .and_then(|ext| ext.attrs().get("url"))
+                .cloned();
+
             Some(Episode {
                 id: 0,
                 podcast_id: 0,
@@ -1285,6 +1259,7 @@ async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Ep
                 download_status: DownloadStatus::NotDownloaded,
                 downloaded_path: None,
                 speed_preset: None,
+                chapters_url,
             })
         })
         .collect();

@@ -1,14 +1,47 @@
 use dirs::data_local_dir;
 use egui::{ColorImage, TextureHandle};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use url::Url;
 
+struct TextureStore {
+    map: HashMap<String, TextureHandle>,
+    order: VecDeque<String>,
+    max_entries: usize,
+}
+
+impl TextureStore {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            max_entries,
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<TextureHandle> {
+        self.map.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: String, texture: TextureHandle) {
+        if self.map.contains_key(&key) {
+            return;
+        }
+        if self.map.len() >= self.max_entries {
+            if let Some(lru) = self.order.pop_back() {
+                self.map.remove(&lru);
+            }
+        }
+        self.map.insert(key.clone(), texture);
+        self.order.push_front(key);
+    }
+}
+
 pub struct ImageCache {
     cache_dir: PathBuf,
-    textures: Arc<Mutex<HashMap<String, TextureHandle>>>,
+    textures: Arc<Mutex<TextureStore>>,
 }
 
 impl ImageCache {
@@ -22,17 +55,20 @@ impl ImageCache {
 
         Self {
             cache_dir: path,
-            textures: Arc::new(Mutex::new(HashMap::new())),
+            textures: Arc::new(Mutex::new(TextureStore::new(75))),
         }
     }
 
     pub fn get_or_load(&self, url: &str, ctx: &egui::Context) -> Option<TextureHandle> {
-        let parsed_url = Self::strip_query(url).unwrap();
+        if url.is_empty() {
+            return None;
+        }
+        let parsed_url = Self::strip_query(url).ok()?;
         let cache_key = self.url_to_cache_key(parsed_url.as_str());
         {
             let textures = self.textures.lock().unwrap();
             if let Some(texture) = textures.get(&cache_key) {
-                return Some(texture.clone());
+                return Some(texture);
             }
         }
 
@@ -74,6 +110,12 @@ impl ImageCache {
         cache_key: &str,
     ) -> Option<TextureHandle> {
         let img = image::open(path).ok()?;
+        // Cap at 400×400 (2× the 200pt max display size) before uploading to GPU.
+        let img = if img.width() > 400 || img.height() > 400 {
+            img.thumbnail(400, 400)
+        } else {
+            img
+        };
         let size = [img.width() as usize, img.height() as usize];
         let image_buffer = img.to_rgba8();
         let pixels = image_buffer.as_flat_samples();
@@ -96,7 +138,7 @@ impl ImageCache {
         {
             let textures = self.textures.lock().unwrap();
             if let Some(texture) = textures.get(cache_key) {
-                return texture.clone();
+                return texture;
             }
         }
 

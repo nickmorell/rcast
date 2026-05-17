@@ -14,6 +14,7 @@ pub struct PodcastDetailPage {
     prefs_open: bool,
     working_prefs: PodcastPreferences,
     prefs_loaded_for: Option<i32>,
+    confirm_remove: bool,
 }
 
 impl Default for SortOrder {
@@ -31,6 +32,7 @@ impl Default for PodcastDetailPage {
             prefs_open: false,
             working_prefs: PodcastPreferences::default(),
             prefs_loaded_for: None,
+            confirm_remove: false,
         }
     }
 }
@@ -63,6 +65,7 @@ impl PodcastDetailPage {
                 skip_outro_seconds: podcast.skip_outro_seconds,
             };
             self.prefs_loaded_for = Some(podcast.id);
+            self.confirm_remove = false;
         }
 
         ui.vertical(|ui| {
@@ -128,6 +131,33 @@ impl PodcastDetailPage {
                             let ids: Vec<i32> = filtered.iter().map(|e| e.id).collect();
                             let _ = cmd_tx.send(AppCommand::PlayAll(ids));
                         }
+                    }
+
+                    ui.add_space(8.0);
+
+                    if self.confirm_remove {
+                        if ui
+                            .button(
+                                egui::RichText::new(format!(
+                                    "{} Confirm Remove?",
+                                    egui_phosphor::regular::WARNING
+                                ))
+                                .color(egui::Color32::from_rgb(220, 80, 80)),
+                            )
+                            .on_hover_text("Deletes the podcast, all episodes, and any downloaded files")
+                            .clicked()
+                        {
+                            let _ = cmd_tx.send(AppCommand::RemovePodcast(podcast.id));
+                            let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.confirm_remove = false;
+                        }
+                    } else if ui
+                        .button(format!("{} Remove Podcast", egui_phosphor::regular::TRASH))
+                        .clicked()
+                    {
+                        self.confirm_remove = true;
                     }
                 });
             });

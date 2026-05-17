@@ -1,3 +1,4 @@
+use crate::chapters::Chapter;
 use crate::components::toast::ToastMessage;
 use crate::db::models::{DownloadStatus, Episode, Podcast};
 use crate::types::{Page, PodcastPreferences, QueueDisplayItem, Settings};
@@ -43,6 +44,7 @@ pub enum AppEvent {
         episode: Episode,
     },
     PlaybackStopped,
+    ChaptersLoaded(Vec<Chapter>),
 
     // Settings
     SettingsLoaded(Settings),

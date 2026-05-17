@@ -4,6 +4,7 @@ mod adapters;
 mod application;
 mod audio_cache;
 mod audio_player;
+mod chapters;
 mod commands;
 mod components;
 mod db;

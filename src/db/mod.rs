@@ -214,7 +214,7 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset
+                        download_status, downloaded_path, speed_preset, chapters_url
                  FROM episodes
                  WHERE podcast_id = ?
                  ORDER BY publish_date DESC",
@@ -241,6 +241,7 @@ impl Database {
                             .unwrap_or_default(),
                         downloaded_path: row.get(13)?,
                         speed_preset: row.get(14)?,
+                        chapters_url: row.get(15)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -258,7 +259,7 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset
+                        download_status, downloaded_path, speed_preset, chapters_url
                  FROM episodes WHERE id = ?",
             )?;
 
@@ -282,6 +283,7 @@ impl Database {
                         .unwrap_or_default(),
                     downloaded_path: row.get(13)?,
                     speed_preset: row.get(14)?,
+                    chapters_url: row.get(15)?,
                 })
             })?;
 
@@ -303,8 +305,8 @@ impl Database {
                     "INSERT OR IGNORE INTO episodes
                         (podcast_id, title, description, url, audio_type,
                          publish_date, is_played, duration, position_seconds,
-                         created_at, updated_at)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0.0,?9,?10)",
+                         created_at, updated_at, chapters_url)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0.0,?9,?10,?11)",
                     params![
                         ep.podcast_id,
                         ep.title,
@@ -316,10 +318,18 @@ impl Database {
                         ep.duration,
                         ep.created_at,
                         ep.updated_at,
+                        ep.chapters_url,
                     ],
                 )?;
                 if tx.changes() > 0 {
                     new_ids.push(tx.last_insert_rowid() as i32);
+                } else if ep.chapters_url.is_some() {
+                    // Episode already exists — backfill chapters_url if it wasn't set before.
+                    tx.execute(
+                        "UPDATE episodes SET chapters_url = ?1
+                         WHERE podcast_id = ?2 AND url = ?3 AND chapters_url IS NULL",
+                        params![ep.chapters_url, ep.podcast_id, ep.url],
+                    )?;
                 }
             }
 
@@ -430,7 +440,7 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset
+                        download_status, downloaded_path, speed_preset, chapters_url
                  FROM episodes
                  WHERE podcast_id = ? AND download_status = 'downloaded'
                  ORDER BY publish_date DESC",
@@ -454,6 +464,7 @@ impl Database {
                         download_status: DownloadStatus::Downloaded,
                         downloaded_path: row.get(13)?,
                         speed_preset: row.get(14)?,
+                        chapters_url: row.get(15)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

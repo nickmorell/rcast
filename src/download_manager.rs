@@ -1,6 +1,5 @@
 use crate::db::Database;
 use crate::utils::string_utils::{sanitize_file_name, sanitize_folder_uri};
-use bytes::Bytes;
 use reqwest::blocking::Client;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,10 +16,6 @@ impl DownloadManager {
             database,
             client: Client::new(),
         }
-    }
-
-    pub fn file_exists(&self, folders: Vec<String>, file_name: &str) -> bool {
-        self.find_file(folders, file_name).is_some()
     }
 
     pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<PathBuf> {
@@ -59,7 +54,7 @@ impl DownloadManager {
             fs::create_dir_all(&download_dir).map_err(|e| e.to_string())?;
         }
 
-        let response = self
+        let mut response = self
             .client
             .get(&url)
             .send()
@@ -93,11 +88,11 @@ impl DownloadManager {
 
         download_dir = download_dir.join(format!("{}{}", sanitize_file_name(&file_name), ext));
 
-        let bytes: Bytes = response
-            .bytes()
-            .map_err(|_| "Failed to read response bytes".to_string())?;
-
-        fs::write(&download_dir, &bytes).map_err(|_| "Failed to write file".to_string())?;
+        let mut file =
+            fs::File::create(&download_dir).map_err(|_| "Failed to create file".to_string())?;
+        response
+            .copy_to(&mut file)
+            .map_err(|_| "Failed to write file".to_string())?;
 
         Ok(download_dir)
     }

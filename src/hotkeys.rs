@@ -56,9 +56,9 @@ impl HotkeyManager {
         }
     }
 
-    pub fn poll(&self, cmd_tx: &UnboundedSender<AppCommand>) {
+    pub fn poll(&self, cmd_tx: &UnboundedSender<AppCommand>, app_focused: bool) {
         while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-            if event.state == HotKeyState::Released {
+            if !app_focused || event.state == HotKeyState::Released {
                 continue;
             }
             if let Some(action) = self.actions.get(&event.id) {

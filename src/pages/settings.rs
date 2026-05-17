@@ -439,7 +439,7 @@ impl SettingsPage {
             ui.add_space(16.0);
 
             // --- Hotkeys ---
-            ui.label(egui::RichText::new("Global Hotkeys").strong().size(14.0));
+            ui.label(egui::RichText::new("Keyboard Shortcuts").strong().size(14.0));
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new("Format: Ctrl+Shift+P  •  Leave blank to disable")
