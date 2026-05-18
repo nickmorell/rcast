@@ -68,6 +68,16 @@ pub struct Episode {
     pub speed_preset: Option<f32>,
     // Chapter support (Podcasting 2.0 namespace)
     pub chapters_url: Option<String>,
+    // Listening statistics
+    pub total_listen_seconds: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListeningStats {
+    pub total_listen_seconds: i64,
+    pub episodes_completed: i64,
+    pub total_podcasts: i64,
+    pub total_episodes: i64,
 }
 
 /** A user-created note, optionally tied to a timestamp.

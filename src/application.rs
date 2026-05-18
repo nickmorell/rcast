@@ -179,7 +179,7 @@ impl RCast {
                 });
                 self.state.now_playing_episode = Some(episode);
                 self.state.now_playing_chapters.clear();
-                self.home_page.show_chapters = false;
+                self.home_page.media_state.show_chapters = false;
             }
             AppEvent::PlaybackStopped => {
                 self.state.now_playing = None;
@@ -269,6 +269,13 @@ impl RCast {
             AppEvent::BookmarkDeleted(id) => {
                 self.state.notes_episode_bookmarks.retain(|b| b.id != id);
                 self.state.notes_podcast_bookmarks.retain(|b| b.id != id);
+            }
+
+            AppEvent::SleepTimerUpdated(ends_at) => {
+                self.state.sleep_timer_ends_at = ends_at;
+            }
+            AppEvent::ListeningStatsLoaded(stats) => {
+                self.state.listening_stats = Some(stats);
             }
 
             // Cross-cutting
@@ -367,7 +374,7 @@ impl eframe::App for RCast {
             let now_playing_id = self.state.now_playing.as_ref().map(|np| np.episode_id);
             let current_pos = self.audio_player.get_position().as_secs_f64();
             self.notes_panel.render(
-                &ctx,
+                ui,
                 &self.state.notes_episode_bookmarks,
                 &self.state.notes_podcast_bookmarks,
                 now_playing_id,
@@ -408,24 +415,29 @@ impl eframe::App for RCast {
                 let now_playing_episode_id =
                     self.state.now_playing.as_ref().map(|np| np.episode_id);
 
-                use crate::components::media_controls::{MediaControls, MediaControlsAction};
+                use crate::components::media_controls::{
+                    MediaControls, MediaControlsAction, NowPlayingContext,
+                };
 
-                let mut volume = self.state.settings.default_volume;
+                // Sync volume from settings into media state before rendering.
+                self.home_page.media_state.volume = self.state.settings.default_volume;
+
+                let now_playing_ctx = NowPlayingContext {
+                    episode: current_episode.as_ref(),
+                    podcast_title: current_podcast_title.as_deref(),
+                    podcast_image: current_podcast_image.as_deref(),
+                    chapters: &self.state.now_playing_chapters,
+                    queue_items: &self.state.queue_display,
+                    image_cache: &self.state.image_cache,
+                    sleep_timer_ends_at: self.state.sleep_timer_ends_at,
+                    notes_open: self.notes_panel.visible,
+                };
+
                 let action = MediaControls::render(
                     ui,
                     &self.audio_player,
-                    &self.state.queue_display,
-                    &self.state.image_cache,
-                    &self.state.settings,
-                    current_episode.as_ref(),
-                    current_podcast_title.as_deref(),
-                    current_podcast_image.as_deref(),
-                    &self.state.now_playing_chapters,
-                    &mut volume,
-                    &mut self.home_page.show_queue,
-                    &mut self.home_page.show_speed_menu,
-                    &mut self.home_page.show_chapters,
-                    self.notes_panel.visible,
+                    &now_playing_ctx,
+                    &mut self.home_page.media_state,
                 );
 
                 match action {
@@ -489,6 +501,9 @@ impl eframe::App for RCast {
                     }
                     MediaControlsAction::RemoveFromQueue(queue_id) => {
                         let _ = self.cmd_tx.send(AppCommand::RemoveFromQueue(queue_id));
+                    }
+                    MediaControlsAction::SetSleepTimer(mins) => {
+                        let _ = self.cmd_tx.send(AppCommand::SetSleepTimer(mins));
                     }
                     MediaControlsAction::None => {}
                 }

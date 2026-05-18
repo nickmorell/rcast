@@ -46,6 +46,12 @@ pub struct AppState {
     pub toasts: ToastQueue,
 
     pub open_add_podcast_requested: bool,
+
+    // Sleep timer
+    pub sleep_timer_ends_at: Option<std::time::Instant>,
+
+    // Statistics
+    pub listening_stats: Option<crate::db::models::ListeningStats>,
 }
 
 impl Default for AppState {
@@ -66,6 +72,8 @@ impl Default for AppState {
             syncing_podcast_ids: HashSet::new(),
             toasts: ToastQueue::default(),
             open_add_podcast_requested: false,
+            sleep_timer_ends_at: None,
+            listening_stats: None,
         }
     }
 }

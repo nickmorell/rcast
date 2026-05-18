@@ -2,6 +2,7 @@ use egui::Ui;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
+use crate::components::media_controls::MediaControlsState;
 use crate::components::podcast_card::PodcastCard;
 use crate::db::models::Podcast;
 use crate::state::AppState;
@@ -10,9 +11,7 @@ use crate::types::{HomeDensity, Page, SortOrder};
 pub struct HomePage {
     search_query: String,
     sort_order: SortOrder,
-    pub show_queue: bool,
-    pub show_speed_menu: bool,
-    pub show_chapters: bool,
+    pub media_state: MediaControlsState,
 }
 
 impl Default for HomePage {
@@ -20,9 +19,7 @@ impl Default for HomePage {
         Self {
             search_query: String::new(),
             sort_order: SortOrder::AToZ,
-            show_queue: false,
-            show_speed_menu: false,
-            show_chapters: false,
+            media_state: MediaControlsState::default(),
         }
     }
 }

@@ -69,6 +69,12 @@ pub enum AppEvent {
         path: String,
     },
 
+    // Sleep Timer
+    SleepTimerUpdated(Option<std::time::Instant>),
+
+    // Statistics
+    ListeningStatsLoaded(crate::db::models::ListeningStats),
+
     // Cross-cutting
     Toast(ToastMessage),
     Error(String),

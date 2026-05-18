@@ -3,11 +3,44 @@ use crate::{
     chapters::{current_chapter, Chapter},
     db::models::Episode,
     image_cache::ImageCache,
-    types::{QueueDisplayItem, Settings},
+    types::QueueDisplayItem,
 };
 use egui::Color32;
 use egui_alignments::center_horizontal;
 use std::time::Duration;
+
+/// Read-only now-playing context passed to the media bar each frame.
+pub struct NowPlayingContext<'a> {
+    pub episode: Option<&'a Episode>,
+    pub podcast_title: Option<&'a str>,
+    pub podcast_image: Option<&'a str>,
+    pub chapters: &'a [Chapter],
+    pub queue_items: &'a [QueueDisplayItem],
+    pub image_cache: &'a ImageCache,
+    pub sleep_timer_ends_at: Option<std::time::Instant>,
+    pub notes_open: bool,
+}
+
+/// Mutable popup-visibility and transient UI state for the media bar.
+pub struct MediaControlsState {
+    pub show_queue: bool,
+    pub show_speed_menu: bool,
+    pub show_chapters: bool,
+    pub show_sleep_timer: bool,
+    pub volume: f32,
+}
+
+impl Default for MediaControlsState {
+    fn default() -> Self {
+        Self {
+            show_queue: false,
+            show_speed_menu: false,
+            show_chapters: false,
+            show_sleep_timer: false,
+            volume: 100.0,
+        }
+    }
+}
 
 pub struct MediaControls;
 
@@ -15,19 +48,17 @@ impl MediaControls {
     pub fn render(
         ui: &mut egui::Ui,
         audio_player: &AudioPlayer,
-        queue_items: &[QueueDisplayItem],
-        image_cache: &ImageCache,
-        _settings: &Settings,
-        current_episode: Option<&Episode>,
-        current_podcast_title: Option<&str>,
-        current_podcast_image: Option<&str>,
-        chapters: &[Chapter],
-        volume: &mut f32,
-        show_queue: &mut bool,
-        show_speed_menu: &mut bool,
-        show_chapters: &mut bool,
-        notes_open: bool,
+        ctx: &NowPlayingContext<'_>,
+        state: &mut MediaControlsState,
     ) -> MediaControlsAction {
+        let current_episode = ctx.episode;
+        let current_podcast_title = ctx.podcast_title;
+        let current_podcast_image = ctx.podcast_image;
+        let chapters = ctx.chapters;
+        let queue_items = ctx.queue_items;
+        let image_cache = ctx.image_cache;
+        let sleep_timer_ends_at = ctx.sleep_timer_ends_at;
+        let notes_open = ctx.notes_open;
         let mut action = MediaControlsAction::None;
 
         let total_width = ui.available_width();
@@ -215,10 +246,10 @@ impl MediaControls {
                     let speed = audio_player.get_speed();
                     let speed_btn = ui.button(format!("{}x", speed));
                     if speed_btn.clicked() {
-                        *show_speed_menu = !*show_speed_menu;
+                        state.show_speed_menu = !state.show_speed_menu;
                     }
 
-                    if *show_speed_menu {
+                    if state.show_speed_menu {
                         let area_response =
                             egui::Area::new(egui::Id::new("speed_menu"))
                                 .fixed_pos(speed_btn.rect.left_bottom())
@@ -234,7 +265,7 @@ impl MediaControls {
                                                     .clicked()
                                                 {
                                                     action = MediaControlsAction::SetSpeed(spd);
-                                                    *show_speed_menu = false;
+                                                    state.show_speed_menu = false;
                                                 }
                                             }
                                             if current_episode.is_some() {
@@ -250,21 +281,20 @@ impl MediaControls {
                                                         MediaControlsAction::SetShowDefaultSpeed(
                                                             speed,
                                                         );
-                                                    *show_speed_menu = false;
+                                                    state.show_speed_menu = false;
                                                 }
                                             }
                                         });
                                     });
                                 });
 
-                        if ui.input(|i| i.pointer.any_click()) {
-                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                                if !area_response.response.rect.contains(pos)
+                        if ui.input(|i| i.pointer.any_click())
+                            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| {
+                                !area_response.response.rect.contains(pos)
                                     && !speed_btn.rect.contains(pos)
-                                {
-                                    *show_speed_menu = false;
-                                }
-                            }
+                            })
+                        {
+                            state.show_speed_menu = false;
                         }
                     }
 
@@ -282,10 +312,10 @@ impl MediaControls {
                         .add_enabled(has_chapters, egui::Button::new(chapters_icon))
                         .on_hover_text("Chapters");
                     if chapters_btn.clicked() {
-                        *show_chapters = !*show_chapters;
+                        state.show_chapters = !state.show_chapters;
                     }
 
-                    if *show_chapters && has_chapters {
+                    if state.show_chapters && has_chapters {
                         let pos_secs = audio_player.get_position().as_secs_f64();
                         let area_response =
                             egui::Area::new(egui::Id::new("chapters_menu"))
@@ -336,7 +366,7 @@ impl MediaControls {
                                                 });
                                                 if row.response.interact(egui::Sense::click()).clicked() {
                                                     action = MediaControlsAction::Seek(start);
-                                                    *show_chapters = false;
+                                                    state.show_chapters = false;
                                                 }
                                                 ui.separator();
                                             }
@@ -344,14 +374,13 @@ impl MediaControls {
                                     });
                                 });
 
-                        if ui.input(|i| i.pointer.any_click()) {
-                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                                if !area_response.response.rect.contains(pos)
+                        if ui.input(|i| i.pointer.any_click())
+                            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| {
+                                !area_response.response.rect.contains(pos)
                                     && !chapters_btn.rect.contains(pos)
-                                {
-                                    *show_chapters = false;
-                                }
-                            }
+                            })
+                        {
+                            state.show_chapters = false;
                         }
                     }
 
@@ -361,7 +390,91 @@ impl MediaControls {
                         egui::RichText::new(egui_phosphor::regular::QUEUE).size(20.0),
                     );
                     if queue_btn.clicked() {
-                        *show_queue = !*show_queue;
+                        state.show_queue = !state.show_queue;
+                    }
+
+                    ui.add_space(5.0);
+
+                    // Sleep timer button
+                    let timer_label = if let Some(ends_at) = sleep_timer_ends_at {
+                        let remaining = ends_at
+                            .checked_duration_since(std::time::Instant::now())
+                            .unwrap_or_default();
+                        let mins = remaining.as_secs() / 60;
+                        let secs = remaining.as_secs() % 60;
+                        format!("{:02}:{:02}", mins, secs)
+                    } else {
+                        egui_phosphor::regular::MOON.to_string()
+                    };
+                    let timer_icon = egui::RichText::new(&timer_label)
+                        .size(if sleep_timer_ends_at.is_some() { 11.0 } else { 20.0 })
+                        .color(if sleep_timer_ends_at.is_some() {
+                            egui::Color32::from_rgb(140, 180, 255)
+                        } else {
+                            ui.visuals().text_color()
+                        });
+                    let timer_btn = ui
+                        .button(timer_icon)
+                        .on_hover_text(if sleep_timer_ends_at.is_some() {
+                            "Sleep timer active"
+                        } else {
+                            "Sleep timer"
+                        });
+                    if timer_btn.clicked() {
+                        state.show_sleep_timer = !state.show_sleep_timer;
+                    }
+
+                    if state.show_sleep_timer {
+                        let area_response =
+                            egui::Area::new(egui::Id::new("sleep_timer_menu"))
+                                .fixed_pos(timer_btn.rect.left_top() - egui::vec2(0.0, 10.0))
+                                .pivot(egui::Align2::LEFT_BOTTOM)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.vertical(|ui| {
+                                            for &mins in &[5u64, 15, 30, 45, 60] {
+                                                if ui
+                                                    .selectable_label(
+                                                        sleep_timer_ends_at.map(|t| {
+                                                            let remaining = t
+                                                                .checked_duration_since(
+                                                                    std::time::Instant::now(),
+                                                                )
+                                                                .unwrap_or_default()
+                                                                .as_secs();
+                                                            // Highlight if within 60s of the preset
+                                                            remaining.abs_diff(mins * 60) < 60
+                                                        }).unwrap_or(false),
+                                                        format!("{} min", mins),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action = MediaControlsAction::SetSleepTimer(
+                                                        Some(mins),
+                                                    );
+                                                    state.show_sleep_timer = false;
+                                                }
+                                            }
+                                            if sleep_timer_ends_at.is_some() {
+                                                ui.separator();
+                                                if ui.button("Off").clicked() {
+                                                    action =
+                                                        MediaControlsAction::SetSleepTimer(None);
+                                                    state.show_sleep_timer = false;
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+
+                        if ui.input(|i| i.pointer.any_click())
+                            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| {
+                                !area_response.response.rect.contains(pos)
+                                    && !timer_btn.rect.contains(pos)
+                            })
+                        {
+                            state.show_sleep_timer = false;
+                        }
                     }
 
                     ui.add_space(5.0);
@@ -379,7 +492,7 @@ impl MediaControls {
                         action = MediaControlsAction::ToggleNotes;
                     }
 
-                    if *show_queue {
+                    if state.show_queue {
                         let area_response =
                             egui::Area::new(egui::Id::new("queue_menu"))
                                 .fixed_pos(queue_btn.rect.left_bottom())
@@ -455,24 +568,23 @@ impl MediaControls {
                                     });
                                 });
 
-                        if ui.input(|i| i.pointer.any_click()) {
-                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                                if !area_response.response.rect.contains(pos)
+                        if ui.input(|i| i.pointer.any_click())
+                            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| {
+                                !area_response.response.rect.contains(pos)
                                     && !queue_btn.rect.contains(pos)
-                                {
-                                    *show_queue = false;
-                                }
-                            }
+                            })
+                        {
+                            state.show_queue = false;
                         }
                     }
 
                     ui.add_space(5.0);
 
-                    let volume_slider = egui::Slider::new(volume, 0.0..=100.0)
+                    let volume_slider = egui::Slider::new(&mut state.volume, 0.0..=100.0)
                         .show_value(false)
                         .trailing_fill(true);
                     if ui.add(volume_slider).changed() {
-                        action = MediaControlsAction::VolumeChanged(*volume);
+                        action = MediaControlsAction::VolumeChanged(state.volume);
                     }
 
                     ui.add_space(5.0);
@@ -512,4 +624,5 @@ pub enum MediaControlsAction {
     SetShowDefaultSpeed(f32),
     RemoveFromQueue(i32),
     ToggleNotes,
+    SetSleepTimer(Option<u64>),
 }

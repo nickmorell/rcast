@@ -25,6 +25,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         &versions::add_download_tracking::AddDownloadTracking,
         &versions::add_podcast_preferences::AddPodcastPreferences,
         &versions::add_episode_chapters_url::AddEpisodeChaptersUrl,
+        &versions::add_episode_listen_time::AddEpisodeTotalListenTime,
     ];
 
     let mut names = HashSet::new();
@@ -63,6 +64,7 @@ pub fn rollback_to(conn: &mut Connection, target_name: &str) -> Result<()> {
         &versions::add_download_tracking::AddDownloadTracking,
         &versions::add_podcast_preferences::AddPodcastPreferences,
         &versions::add_episode_chapters_url::AddEpisodeChaptersUrl,
+        &versions::add_episode_listen_time::AddEpisodeTotalListenTime,
     ];
 
     let target_pos = migrations
@@ -105,6 +107,7 @@ pub fn rollback_n(conn: &mut Connection, count: usize) -> Result<()> {
         &versions::add_download_tracking::AddDownloadTracking,
         &versions::add_podcast_preferences::AddPodcastPreferences,
         &versions::add_episode_chapters_url::AddEpisodeChaptersUrl,
+        &versions::add_episode_listen_time::AddEpisodeTotalListenTime,
     ];
 
     let limit: i64 = count as i64;

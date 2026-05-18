@@ -214,7 +214,8 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset, chapters_url
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
                  FROM episodes
                  WHERE podcast_id = ?
                  ORDER BY publish_date DESC",
@@ -242,6 +243,7 @@ impl Database {
                         downloaded_path: row.get(13)?,
                         speed_preset: row.get(14)?,
                         chapters_url: row.get(15)?,
+                        total_listen_seconds: row.get(16)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -259,7 +261,8 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset, chapters_url
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
                  FROM episodes WHERE id = ?",
             )?;
 
@@ -284,6 +287,7 @@ impl Database {
                     downloaded_path: row.get(13)?,
                     speed_preset: row.get(14)?,
                     chapters_url: row.get(15)?,
+                    total_listen_seconds: row.get(16)?,
                 })
             })?;
 
@@ -440,7 +444,8 @@ impl Database {
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
                         created_at, updated_at,
-                        download_status, downloaded_path, speed_preset, chapters_url
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
                  FROM episodes
                  WHERE podcast_id = ? AND download_status = 'downloaded'
                  ORDER BY publish_date DESC",
@@ -465,6 +470,7 @@ impl Database {
                         downloaded_path: row.get(13)?,
                         speed_preset: row.get(14)?,
                         chapters_url: row.get(15)?,
+                        total_listen_seconds: row.get(16)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -797,6 +803,52 @@ impl Database {
             }
 
             Ok(())
+        })
+        .await?
+    }
+
+    // Listening statistics
+
+    pub async fn increment_listen_seconds(
+        &self,
+        episode_id: i32,
+        secs: u64,
+    ) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            conn.execute(
+                "UPDATE episodes SET total_listen_seconds = total_listen_seconds + ?2 WHERE id = ?1",
+                params![episode_id, secs as i64],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn get_listening_stats(&self) -> anyhow::Result<models::ListeningStats> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+
+            let (total_listen_seconds, episodes_completed, total_episodes) = conn.query_row(
+                "SELECT COALESCE(SUM(total_listen_seconds), 0),
+                        COUNT(CASE WHEN is_played = 1 THEN 1 END),
+                        COUNT(*)
+                 FROM episodes",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            )?;
+
+            let total_podcasts: i64 =
+                conn.query_row("SELECT COUNT(*) FROM podcasts", [], |row| row.get(0))?;
+
+            Ok(models::ListeningStats {
+                total_listen_seconds,
+                episodes_completed,
+                total_podcasts,
+                total_episodes,
+            })
         })
         .await?
     }

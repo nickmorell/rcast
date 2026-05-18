@@ -69,7 +69,7 @@ impl NotesPanel {
 
     pub fn render(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         episode_bookmarks: &[Bookmark],
         podcast_bookmarks: &[Bookmark],
         now_playing_episode_id: Option<i32>,
@@ -95,7 +95,7 @@ impl NotesPanel {
                 inner_margin: egui::Margin::symmetric(0, 0),
                 ..Default::default()
             })
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
 
                 // Header

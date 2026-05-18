@@ -69,7 +69,13 @@ pub enum AppCommand {
         path: std::path::PathBuf,
     },
 
+    // -- Sleep Timer ----------------------------------------------------------
+    SetSleepTimer(Option<u64>),
+
     // -- Settings -------------------------------------------------------------
     SaveSettings(Settings),
     ApplyHotkeys(HotkeySettings),
+
+    // -- Statistics -----------------------------------------------------------
+    LoadListeningStats,
 }

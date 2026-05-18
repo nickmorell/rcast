@@ -21,6 +21,11 @@ pub struct Orchestrator {
     last_saved_position: f64,
     settings: Settings,
     current_skip_outro_seconds: i32,
+    // Sleep timer
+    sleep_timer_target: Option<std::time::Instant>,
+    // Listen-time tracking
+    session_start: Option<std::time::Instant>,
+    session_flushed_secs: u64,
 }
 
 impl Orchestrator {
@@ -42,6 +47,9 @@ impl Orchestrator {
             last_saved_position: 0.0,
             settings: Settings::default(),
             current_skip_outro_seconds: 0,
+            sleep_timer_target: None,
+            session_start: None,
+            session_flushed_secs: 0,
         }
     }
 
@@ -88,6 +96,7 @@ impl Orchestrator {
                 _ = save_ticker.tick() => {
                     self.auto_save_position().await;
                     self.check_outro_skip().await;
+                    self.check_sleep_timer().await;
                 }
             }
         }
@@ -119,6 +128,15 @@ impl Orchestrator {
         {
             self.last_saved_position = position;
         }
+
+        if let Some(start) = &self.session_start {
+            let total = start.elapsed().as_secs();
+            let delta = total - self.session_flushed_secs;
+            if delta > 0 {
+                self.db.increment_listen_seconds(episode_id, delta).await.ok();
+                self.session_flushed_secs = total;
+            }
+        }
     }
 
     async fn check_outro_skip(&mut self) {
@@ -140,6 +158,36 @@ impl Orchestrator {
         }
     }
 
+    async fn check_sleep_timer(&mut self) {
+        let target = match self.sleep_timer_target {
+            Some(t) => t,
+            None => return,
+        };
+
+        if std::time::Instant::now() < target {
+            return;
+        }
+
+        self.sleep_timer_target = None;
+        self.flush_listen_session().await;
+        self.audio_player.pause();
+        let _ = self.event_tx.send(AppEvent::PlaybackStopped);
+        let _ = self.event_tx.send(AppEvent::SleepTimerUpdated(None));
+    }
+
+    async fn flush_listen_session(&mut self) {
+        if let Some(start) = self.session_start.take() {
+            let total = start.elapsed().as_secs();
+            let delta = total - self.session_flushed_secs;
+            self.session_flushed_secs = 0;
+            if delta > 0 {
+                if let Some(episode_id) = self.audio_player.get_current_episode_id() {
+                    self.db.increment_listen_seconds(episode_id, delta).await.ok();
+                }
+            }
+        }
+    }
+
     async fn handle(&mut self, cmd: AppCommand) {
         match cmd {
             // Navigation
@@ -158,6 +206,18 @@ impl Orchestrator {
                     Page::Settings => match self.db.get_settings().await {
                         Ok(s) => {
                             let _ = self.event_tx.send(AppEvent::SettingsLoaded(s));
+                            match self.db.get_listening_stats().await {
+                                Ok(stats) => {
+                                    let _ = self
+                                        .event_tx
+                                        .send(AppEvent::ListeningStatsLoaded(stats));
+                                }
+                                Err(e) => {
+                                    let _ = self.event_tx.send(AppEvent::Error(format!(
+                                        "Failed to load stats: {e}"
+                                    )));
+                                }
+                            }
                         }
                         Err(e) => {
                             let _ = self
@@ -435,6 +495,7 @@ impl Orchestrator {
                 self.refresh_queue_display().await;
             }
             AppCommand::PausePlayback => {
+                self.flush_listen_session().await;
                 if let Some(episode_id) = self.audio_player.get_current_episode_id() {
                     let position = self.audio_player.get_position().as_secs_f64();
                     self.db
@@ -446,12 +507,15 @@ impl Orchestrator {
                 self.audio_player.pause();
             }
             AppCommand::ResumePlayback => {
+                self.session_start = Some(std::time::Instant::now());
+                self.session_flushed_secs = 0;
                 self.audio_player.resume();
             }
             AppCommand::TogglePlayback => {
                 use crate::audio_player::PlaybackState;
                 match self.audio_player.get_state() {
                     PlaybackState::Playing => {
+                        self.flush_listen_session().await;
                         if let Some(episode_id) = self.audio_player.get_current_episode_id() {
                             let position = self.audio_player.get_position().as_secs_f64();
                             self.db.update_episode_position(episode_id, position).await.ok();
@@ -460,6 +524,8 @@ impl Orchestrator {
                         self.audio_player.pause();
                     }
                     PlaybackState::Paused => {
+                        self.session_start = Some(std::time::Instant::now());
+                        self.session_flushed_secs = 0;
                         self.audio_player.resume();
                     }
                     PlaybackState::Stopped => {}
@@ -645,6 +711,36 @@ impl Orchestrator {
             AppCommand::ApplyHotkeys(_) => {
                 // Handled in the UI layer (application.rs); orchestrator ignores this.
             }
+
+            // Sleep Timer
+            AppCommand::SetSleepTimer(minutes) => {
+                match minutes {
+                    Some(n) => {
+                        let target = std::time::Instant::now()
+                            + std::time::Duration::from_secs(n * 60);
+                        self.sleep_timer_target = Some(target);
+                        let _ = self.event_tx.send(AppEvent::SleepTimerUpdated(Some(target)));
+                    }
+                    None => {
+                        self.sleep_timer_target = None;
+                        let _ = self.event_tx.send(AppEvent::SleepTimerUpdated(None));
+                    }
+                }
+            }
+
+            // Statistics
+            AppCommand::LoadListeningStats => {
+                match self.db.get_listening_stats().await {
+                    Ok(stats) => {
+                        let _ = self.event_tx.send(AppEvent::ListeningStatsLoaded(stats));
+                    }
+                    Err(e) => {
+                        let _ = self
+                            .event_tx
+                            .send(AppEvent::Error(format!("Failed to load stats: {e}")));
+                    }
+                }
+            }
         }
     }
 
@@ -740,6 +836,11 @@ impl Orchestrator {
 
         // Track skip-outro duration for this episode's podcast.
         self.current_skip_outro_seconds = podcast.skip_outro_seconds;
+
+        // Flush any listen time from the previous episode before starting a new one.
+        self.flush_listen_session().await;
+        self.session_start = Some(std::time::Instant::now());
+        self.session_flushed_secs = 0;
 
         self.last_saved_position = resume_position;
         let should_resume = resume_position > 5.0;
@@ -1260,6 +1361,7 @@ async fn fetch_feed(url: &str) -> anyhow::Result<(String, String, String, Vec<Ep
                 downloaded_path: None,
                 speed_preset: None,
                 chapters_url,
+                total_listen_seconds: 0,
             })
         })
         .collect();

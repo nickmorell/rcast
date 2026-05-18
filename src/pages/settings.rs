@@ -477,6 +477,63 @@ impl SettingsPage {
                     ui.end_row();
                 });
 
+            ui.add_space(20.0);
+            ui.separator();
+            ui.add_space(16.0);
+
+            // --- Statistics ---
+            ui.label(egui::RichText::new("Statistics").strong().size(14.0));
+            ui.add_space(8.0);
+
+            egui::Grid::new("stats_grid")
+                .num_columns(2)
+                .spacing([16.0, 6.0])
+                .show(ui, |ui| {
+                    if let Some(stats) = &state.listening_stats {
+                        let total_hours = stats.total_listen_seconds / 3600;
+                        let total_mins = (stats.total_listen_seconds % 3600) / 60;
+                        let listen_str = if total_hours > 0 {
+                            format!("{} h {} m", total_hours, total_mins)
+                        } else {
+                            format!("{} m", total_mins)
+                        };
+
+                        ui.label(
+                            egui::RichText::new("Total listening time:")
+                                .color(egui::Color32::from_rgb(150, 150, 155)),
+                        );
+                        ui.label(listen_str);
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Episodes completed:")
+                                .color(egui::Color32::from_rgb(150, 150, 155)),
+                        );
+                        ui.label(stats.episodes_completed.to_string());
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Shows in library:")
+                                .color(egui::Color32::from_rgb(150, 150, 155)),
+                        );
+                        ui.label(stats.total_podcasts.to_string());
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Total episodes:")
+                                .color(egui::Color32::from_rgb(150, 150, 155)),
+                        );
+                        ui.label(stats.total_episodes.to_string());
+                        ui.end_row();
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Loading…")
+                                .color(egui::Color32::from_rgb(150, 150, 155)),
+                        );
+                        ui.end_row();
+                    }
+                });
+
             ui.add_space(32.0);
         });
 
