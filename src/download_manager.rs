@@ -69,7 +69,7 @@ impl DownloadManager {
                 v.split(';')
                     .map(str::trim)
                     .find(|p| p.to_lowercase().starts_with("filename="))
-                    .and_then(|p| p.splitn(2, '=').nth(1))
+                    .and_then(|p| p.split_once('=').map(|x| x.1))
                     .map(|f| f.trim_matches('"').to_string())
             })
             .and_then(|filename| {

@@ -11,11 +11,12 @@ pub enum Page {
 
 // Sort order
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SortOrder {
     AToZ,
     ZToA,
     PublishDateAsc,
+    #[default]
     PublishDateDesc,
 }
 
@@ -39,25 +40,13 @@ pub enum TrimSilenceMode {
 
 // Hotkey settings (one string per action, empty = unbound)
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HotkeySettings {
     pub play_pause: String,
     pub next: String,
     pub prev: String,
     pub skip_forward: String,
     pub skip_backward: String,
-}
-
-impl Default for HotkeySettings {
-    fn default() -> Self {
-        Self {
-            play_pause: String::new(),
-            next: String::new(),
-            prev: String::new(),
-            skip_forward: String::new(),
-            skip_backward: String::new(),
-        }
-    }
 }
 
 // Per-show playback/download preferences (all optional — None means inherit global)

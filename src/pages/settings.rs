@@ -235,17 +235,16 @@ impl SettingsPage {
                 if ui
                     .add_enabled(!is_selecting, egui::Button::new(button_text))
                     .clicked()
+                    && let Some(picker) = &self.folder_picker
                 {
-                    if let Some(picker) = &self.folder_picker {
-                        let start_path = if self.working.download_directory.is_empty() {
-                            None
-                        } else {
-                            PathBuf::from(&self.working.download_directory)
-                                .parent()
-                                .map(|p| p.to_path_buf())
-                        };
-                        self.pending_folder_selection = Some(picker.select_folder(start_path));
-                    }
+                    let start_path = if self.working.download_directory.is_empty() {
+                        None
+                    } else {
+                        PathBuf::from(&self.working.download_directory)
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                    };
+                    self.pending_folder_selection = Some(picker.select_folder(start_path));
                 }
             });
 
@@ -290,11 +289,10 @@ impl SettingsPage {
                     )
                     .on_hover_text("Import podcast subscriptions from an OPML file")
                     .clicked()
+                    && let Some(picker) = &self.file_picker
                 {
-                    if let Some(picker) = &self.file_picker {
-                        self.pending_import_path =
-                            Some(picker.pick_file("Import OPML Subscriptions"));
-                    }
+                    self.pending_import_path =
+                        Some(picker.pick_file("Import OPML Subscriptions"));
                 }
 
                 ui.add_space(10.0);
@@ -310,12 +308,11 @@ impl SettingsPage {
                     )
                     .on_hover_text("Export your subscriptions as an OPML file")
                     .clicked()
+                    && let Some(picker) = &self.file_picker
                 {
-                    if let Some(picker) = &self.file_picker {
-                        self.pending_export_path = Some(
-                            picker.save_file("Export OPML Subscriptions", "rcast-subscriptions.opml"),
-                        );
-                    }
+                    self.pending_export_path = Some(
+                        picker.save_file("Export OPML Subscriptions", "rcast-subscriptions.opml"),
+                    );
                 }
             });
 

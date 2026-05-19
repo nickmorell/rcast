@@ -40,10 +40,6 @@ impl AudioPlayer {
         *self.trim_silence_mode.lock().unwrap() = mode;
     }
 
-    pub fn get_trim_silence_mode(&self) -> TrimSilenceMode {
-        *self.trim_silence_mode.lock().unwrap()
-    }
-
     pub fn play_from_file(&self, path: &str, episode_id: i32) -> Result<(), String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let source = Decoder::new(file).map_err(|e| e.to_string())?;
@@ -85,7 +81,7 @@ impl AudioPlayer {
 
         let mut stream = DeviceSinkBuilder::open_default_sink().map_err(|e| e.to_string())?;
         stream.log_on_drop(false);
-        let new_player = Player::connect_new(&stream.mixer());
+        let new_player = Player::connect_new(stream.mixer());
         let speed = *self.playback_speed.lock().unwrap();
         let trim_mode = *self.trim_silence_mode.lock().unwrap();
 

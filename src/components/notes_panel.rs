@@ -16,6 +16,7 @@ const PODCAST_NOTE_BG: Color32 = Color32::from_rgb(40, 38, 60);
 const DELETE_RED: Color32 = Color32::from_rgb(200, 70, 70);
 const CONFIRM_BG: Color32 = Color32::from_rgb(55, 30, 30);
 
+#[derive(Default)]
 pub struct NotesPanel {
     pub episode_id: Option<i32>,
     pub podcast_id: Option<i32>,
@@ -30,22 +31,6 @@ pub struct NotesPanel {
 
     pub visible: bool,
     pub seek_request: Option<Duration>,
-}
-
-impl Default for NotesPanel {
-    fn default() -> Self {
-        Self {
-            episode_id: None,
-            podcast_id: None,
-            episode_title: String::new(),
-            input_text: String::new(),
-            edit_id: None,
-            edit_text: String::new(),
-            delete_confirm_id: None,
-            visible: false,
-            seek_request: None,
-        }
-    }
 }
 
 impl NotesPanel {
@@ -87,9 +72,9 @@ impl NotesPanel {
 
         let is_live = now_playing_episode_id == Some(panel_episode_id);
 
-        egui::SidePanel::right("notes_panel")
+        egui::Panel::right("notes_panel")
             .resizable(false)
-            .exact_width(310.0)
+            .exact_size(310.0)
             .frame(egui::Frame {
                 fill: BG,
                 inner_margin: egui::Margin::symmetric(0, 0),
@@ -340,11 +325,9 @@ impl NotesPanel {
                     }
 
                     // Show locked timestamp if present (not seekable in edit mode)
-                    if show_timestamp {
-                        if let Some(pos) = bookmark.position_seconds {
-                            let _ = timestamp_badge(ui, pos);
-                            ui.add_space(6.0);
-                        }
+                    if show_timestamp && let Some(pos) = bookmark.position_seconds {
+                        let _ = timestamp_badge(ui, pos);
+                        ui.add_space(6.0);
                     }
 
                     let edit_input = egui::TextEdit::multiline(&mut self.edit_text)
@@ -387,15 +370,13 @@ impl NotesPanel {
                 } else {
                     // Normal read mode
                     // Timestamp badge — clicking seeks to that position
-                    if show_timestamp {
-                        if let Some(pos) = bookmark.position_seconds {
-                            let resp = timestamp_badge(ui, pos);
-                            if resp.clicked() {
-                                self.seek_request = Some(Duration::from_secs_f64(pos));
-                            }
-                            resp.on_hover_text("Click to seek");
-                            ui.add_space(4.0);
+                    if show_timestamp && let Some(pos) = bookmark.position_seconds {
+                        let resp = timestamp_badge(ui, pos);
+                        if resp.clicked() {
+                            self.seek_request = Some(Duration::from_secs_f64(pos));
                         }
+                        resp.on_hover_text("Click to seek");
+                        ui.add_space(4.0);
                     }
 
                     ui.horizontal(|ui| {

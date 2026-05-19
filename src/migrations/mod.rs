@@ -124,7 +124,7 @@ pub fn rollback_n(conn: &mut Connection, count: usize) -> Result<()> {
         let migration = migrations
             .iter()
             .find(|m| m.name() == name.as_str())
-            .expect(&format!("Migration '{}' not found", name));
+            .unwrap_or_else(|| panic!("Migration '{}' not found", name));
 
         migration.down(&tx).unwrap();
 

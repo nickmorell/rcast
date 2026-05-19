@@ -121,14 +121,14 @@ impl RCast {
 
             // Per-show preferences
             AppEvent::PodcastPreferencesUpdated { podcast_id, prefs } => {
-                if let Some(p) = self.state.detail_podcast.as_mut() {
-                    if p.id == podcast_id {
-                        p.speed_preset = prefs.speed_preset;
-                        p.auto_download = prefs.auto_download;
-                        p.keep_episodes_count = prefs.keep_episodes_count;
-                        p.skip_intro_seconds = prefs.skip_intro_seconds;
-                        p.skip_outro_seconds = prefs.skip_outro_seconds;
-                    }
+                if let Some(p) = self.state.detail_podcast.as_mut()
+                    && p.id == podcast_id
+                {
+                    p.speed_preset = prefs.speed_preset;
+                    p.auto_download = prefs.auto_download;
+                    p.keep_episodes_count = prefs.keep_episodes_count;
+                    p.skip_intro_seconds = prefs.skip_intro_seconds;
+                    p.skip_outro_seconds = prefs.skip_outro_seconds;
                 }
             }
 
@@ -155,10 +155,8 @@ impl RCast {
                     DownloadStatus::Failed => Some("Download failed"),
                     DownloadStatus::NotDownloaded => None,
                 };
-                if let Some(msg) = label {
-                    if status == DownloadStatus::Failed {
-                        self.state.toasts.push(toast::ToastMessage::error(msg));
-                    }
+                if let Some(msg) = label && status == DownloadStatus::Failed {
+                    self.state.toasts.push(toast::ToastMessage::error(msg));
                 }
             }
 

@@ -17,12 +17,6 @@ pub struct PodcastDetailPage {
     confirm_remove: bool,
 }
 
-impl Default for SortOrder {
-    fn default() -> Self {
-        SortOrder::PublishDateDesc
-    }
-}
-
 impl Default for PodcastDetailPage {
     fn default() -> Self {
         Self {
@@ -280,10 +274,8 @@ impl PodcastDetailPage {
                                 if ui.button("Use Global").clicked() {
                                     self.working_prefs.keep_episodes_count = None;
                                 }
-                            } else {
-                                if ui.button("Override").clicked() {
-                                    self.working_prefs.keep_episodes_count = Some(0);
-                                }
+                            } else if ui.button("Override").clicked() {
+                                self.working_prefs.keep_episodes_count = Some(0);
                             }
                         });
                         ui.end_row();

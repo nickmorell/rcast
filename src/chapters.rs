@@ -24,7 +24,9 @@ fn default_true() -> bool {
 pub struct Chapter {
     pub start_time: f64,
     pub title: String,
+    #[allow(dead_code)]
     pub img: Option<String>,
+    #[allow(dead_code)]
     pub url: Option<String>,
     pub toc: bool,
 }

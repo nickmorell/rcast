@@ -106,9 +106,9 @@ impl Episode {
 
         if days == 0 {
             "Today".to_string()
-        } else if days >= 1 && days <= 6 {
+        } else if (1..=6).contains(&days) {
             format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
-        } else if days >= 7 && days <= 21 {
+        } else if (7..=21).contains(&days) {
             let weeks = days / 7;
             format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" })
         } else {

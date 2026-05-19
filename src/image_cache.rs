@@ -29,10 +29,8 @@ impl TextureStore {
         if self.map.contains_key(&key) {
             return;
         }
-        if self.map.len() >= self.max_entries {
-            if let Some(lru) = self.order.pop_back() {
-                self.map.remove(&lru);
-            }
+        if self.map.len() >= self.max_entries && let Some(lru) = self.order.pop_back() {
+            self.map.remove(&lru);
         }
         self.map.insert(key.clone(), texture);
         self.order.push_front(key);
@@ -73,10 +71,10 @@ impl ImageCache {
         }
 
         let cached_path = self.cache_dir.join(&cache_key);
-        if cached_path.exists() {
-            if let Some(texture) = self.load_image_from_path(&cached_path, ctx, &cache_key) {
-                return Some(texture);
-            }
+        if cached_path.exists()
+            && let Some(texture) = self.load_image_from_path(&cached_path, ctx, &cache_key)
+        {
+            return Some(texture);
         }
 
         self.download_and_cache(url, ctx, &cache_key)

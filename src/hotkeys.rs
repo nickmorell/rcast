@@ -49,7 +49,7 @@ impl HotkeyManager {
         if let Some(hk) = parse_hotkey(hotkey_str) {
             let id = hk.id();
             // register() takes by value; clone so we can keep a copy for unregister later.
-            if self.manager.register(hk.clone()).is_ok() {
+            if self.manager.register(hk).is_ok() {
                 self.actions.insert(id, action);
                 self.registered.push(hk);
             }

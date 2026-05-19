@@ -180,10 +180,8 @@ impl Orchestrator {
             let total = start.elapsed().as_secs();
             let delta = total - self.session_flushed_secs;
             self.session_flushed_secs = 0;
-            if delta > 0 {
-                if let Some(episode_id) = self.audio_player.get_current_episode_id() {
-                    self.db.increment_listen_seconds(episode_id, delta).await.ok();
-                }
+            if delta > 0 && let Some(episode_id) = self.audio_player.get_current_episode_id() {
+                self.db.increment_listen_seconds(episode_id, delta).await.ok();
             }
         }
     }
@@ -435,30 +433,27 @@ impl Orchestrator {
             }
 
             AppCommand::TogglePlayed(episode_id) => {
-                match self.db.get_episode(episode_id).await {
-                    Ok(Some(ep)) => {
-                        self.db
-                            .update_episode_played(episode_id, !ep.is_played)
-                            .await
-                            .ok();
+                if let Ok(Some(ep)) = self.db.get_episode(episode_id).await {
+                    self.db
+                        .update_episode_played(episode_id, !ep.is_played)
+                        .await
+                        .ok();
 
-                        if let Some(podcast_id) = self.current_detail_podcast_id {
-                            match self.db.get_episodes(podcast_id).await {
-                                Ok(episodes) => {
-                                    let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
-                                        podcast_id,
-                                        episodes,
-                                    });
-                                }
-                                Err(e) => {
-                                    let _ = self.event_tx.send(AppEvent::Error(format!(
-                                        "Failed to reload episodes: {e}"
-                                    )));
-                                }
+                    if let Some(podcast_id) = self.current_detail_podcast_id {
+                        match self.db.get_episodes(podcast_id).await {
+                            Ok(episodes) => {
+                                let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
+                                    podcast_id,
+                                    episodes,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = self.event_tx.send(AppEvent::Error(format!(
+                                    "Failed to reload episodes: {e}"
+                                )));
                             }
                         }
                     }
-                    _ => {}
                 }
             }
 
@@ -470,13 +465,13 @@ impl Orchestrator {
             }
             AppCommand::CompleteEpisode(episode_id) => {
                 self.db.complete_episode(episode_id).await.ok();
-                if let Some(podcast_id) = self.current_detail_podcast_id {
-                    if let Ok(eps) = self.db.get_episodes(podcast_id).await {
-                        let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
-                            podcast_id,
-                            episodes: eps,
-                        });
-                    }
+                if let Some(podcast_id) = self.current_detail_podcast_id
+                    && let Ok(eps) = self.db.get_episodes(podcast_id).await
+                {
+                    let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
+                        podcast_id,
+                        episodes: eps,
+                    });
                 }
             }
 
@@ -542,13 +537,13 @@ impl Orchestrator {
                     self.db.complete_episode(episode_id).await.ok();
                     self.last_saved_position = 0.0;
                     // Refresh the detail list so the completed episode shows as played.
-                    if let Some(podcast_id) = self.current_detail_podcast_id {
-                        if let Ok(eps) = self.db.get_episodes(podcast_id).await {
-                            let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
-                                podcast_id,
-                                episodes: eps,
-                            });
-                        }
+                    if let Some(podcast_id) = self.current_detail_podcast_id
+                        && let Ok(eps) = self.db.get_episodes(podcast_id).await
+                    {
+                        let _ = self.event_tx.send(AppEvent::EpisodesUpdated {
+                            podcast_id,
+                            episodes: eps,
+                        });
                     }
                 }
                 self.current_skip_outro_seconds = 0;
@@ -853,45 +848,44 @@ impl Orchestrator {
         };
 
         // Tier 1: use tracked downloaded_path from DB.
-        if episode.download_status == DownloadStatus::Downloaded {
-            if let Some(path) = episode.downloaded_path.clone() {
-                if std::path::Path::new(&path).exists() {
-                    let ep = episode_for_event.clone();
-                    tokio::task::spawn_blocking(move || {
-                        match audio_player.play_from_file(&path, episode_id) {
-                            Ok(_) => {
-                                let seek_to = if intro_skip > 0 && !should_resume {
-                                    std::time::Duration::from_secs(intro_skip as u64)
-                                } else if should_resume {
-                                    std::time::Duration::from_secs_f64(resume_position)
-                                } else {
-                                    std::time::Duration::ZERO
-                                };
-                                if seek_to > std::time::Duration::ZERO {
-                                    audio_player.seek(seek_to);
-                                    if should_resume {
-                                        let mins = (resume_position as u64) / 60;
-                                        let secs = (resume_position as u64) % 60;
-                                        let _ = tx.send(AppEvent::Toast(ToastMessage::info(
-                                            &format!("Resuming from {:02}:{:02}", mins, secs),
-                                        )));
-                                    }
-                                }
-                                let _ = tx.send(AppEvent::PlaybackStarted {
-                                    episode_id,
-                                    podcast_id,
-                                    episode: ep,
-                                });
-                            }
-                            Err(e) => {
-                                let _ =
-                                    tx.send(AppEvent::Error(format!("Playback failed: {e}")));
+        if episode.download_status == DownloadStatus::Downloaded
+            && let Some(path) = episode.downloaded_path.clone()
+            && std::path::Path::new(&path).exists()
+        {
+            let ep = episode_for_event.clone();
+            tokio::task::spawn_blocking(move || {
+                match audio_player.play_from_file(&path, episode_id) {
+                    Ok(_) => {
+                        let seek_to = if intro_skip > 0 && !should_resume {
+                            std::time::Duration::from_secs(intro_skip as u64)
+                        } else if should_resume {
+                            std::time::Duration::from_secs_f64(resume_position)
+                        } else {
+                            std::time::Duration::ZERO
+                        };
+                        if seek_to > std::time::Duration::ZERO {
+                            audio_player.seek(seek_to);
+                            if should_resume {
+                                let mins = (resume_position as u64) / 60;
+                                let secs = (resume_position as u64) % 60;
+                                let _ = tx.send(AppEvent::Toast(ToastMessage::info(
+                                    &format!("Resuming from {:02}:{:02}", mins, secs),
+                                )));
                             }
                         }
-                    });
-                    return;
+                        let _ = tx.send(AppEvent::PlaybackStarted {
+                            episode_id,
+                            podcast_id,
+                            episode: ep,
+                        });
+                    }
+                    Err(e) => {
+                        let _ =
+                            tx.send(AppEvent::Error(format!("Playback failed: {e}")));
+                    }
                 }
-            }
+            });
+            return;
         }
 
         // Tier 2: legacy file scan (backwards compat).
@@ -989,7 +983,7 @@ impl Orchestrator {
         .await
         {
             Ok(Ok(raw)) => {
-                let bytes_data = bytes::Bytes::from(raw);
+                let bytes_data = raw;
                 self.audio_cache.insert(episode_id, bytes_data.clone());
                 let audio_player2 = audio_player.clone();
                 tokio::task::spawn_blocking(move || {
@@ -1196,39 +1190,39 @@ async fn sync_podcast(
                     let tx2 = tx.clone();
                     let settings2 = settings.clone();
                     tokio::spawn(async move {
-                        if let Ok(Some(ep)) = db2.get_episode(episode_id).await {
-                            if let Ok(Some(pod)) = db2.get_podcast(ep.podcast_id).await {
-                                let dm2 = crate::download_manager::DownloadManager::new(db2.clone());
-                                let folders = vec![pod.title.clone()];
-                                let file_name = ep.title.clone();
-                                let ep_title = ep.title.clone();
-                                let podcast_id2 = pod.id;
-                                let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Downloading, None).await;
-                                let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Downloading, path: None });
-                                tokio::task::spawn_blocking(move || {
-                                    match dm2.download(ep.url, folders, file_name) {
-                                        Ok(path) => {
-                                            let path_str = path.to_string_lossy().to_string();
-                                            let rt = tokio::runtime::Handle::current();
-                                            rt.block_on(async {
-                                                let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Downloaded, Some(path_str.clone())).await;
-                                                enforce_retention_policy(podcast_id2, &db2, &dm2, &settings2).await;
-                                            });
-                                            if settings2.notify_download_complete {
-                                                send_notification("Download complete", &ep_title);
-                                            }
-                                            let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Downloaded, path: Some(path_str) });
+                        if let Ok(Some(ep)) = db2.get_episode(episode_id).await
+                            && let Ok(Some(pod)) = db2.get_podcast(ep.podcast_id).await
+                        {
+                            let dm2 = crate::download_manager::DownloadManager::new(db2.clone());
+                            let folders = vec![pod.title.clone()];
+                            let file_name = ep.title.clone();
+                            let ep_title = ep.title.clone();
+                            let podcast_id2 = pod.id;
+                            let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Downloading, None).await;
+                            let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Downloading, path: None });
+                            tokio::task::spawn_blocking(move || {
+                                match dm2.download(ep.url, folders, file_name) {
+                                    Ok(path) => {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        let rt = tokio::runtime::Handle::current();
+                                        rt.block_on(async {
+                                            let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Downloaded, Some(path_str.clone())).await;
+                                            enforce_retention_policy(podcast_id2, &db2, &dm2, &settings2).await;
+                                        });
+                                        if settings2.notify_download_complete {
+                                            send_notification("Download complete", &ep_title);
                                         }
-                                        Err(_) => {
-                                            let rt = tokio::runtime::Handle::current();
-                                            rt.block_on(async {
-                                                let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Failed, None).await;
-                                            });
-                                            let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Failed, path: None });
-                                        }
+                                        let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Downloaded, path: Some(path_str) });
                                     }
-                                }).await.ok();
-                            }
+                                    Err(_) => {
+                                        let rt = tokio::runtime::Handle::current();
+                                        rt.block_on(async {
+                                            let _ = db2.update_episode_download_status(episode_id, DownloadStatus::Failed, None).await;
+                                        });
+                                        let _ = tx2.send(AppEvent::DownloadStatusChanged { episode_id, status: DownloadStatus::Failed, path: None });
+                                    }
+                                }
+                            }).await.ok();
                         }
                     });
                 }
@@ -1486,12 +1480,12 @@ fn parse_opml_feed_urls(opml: &str) -> Vec<String> {
                         let key = std::str::from_utf8(attr.key.as_ref())
                             .unwrap_or("")
                             .to_lowercase();
-                        if key == "xmlurl" {
-                            if let Ok(val) = attr.decode_and_unescape_value(reader.decoder()) {
-                                let url: String = val.trim().to_string();
-                                if !url.is_empty() {
-                                    xml_url = Some(url);
-                                }
+                        if key == "xmlurl"
+                            && let Ok(val) = attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+                        {
+                            let url: String = val.trim().to_string();
+                            if !url.is_empty() {
+                                xml_url = Some(url);
                             }
                         }
                     }
