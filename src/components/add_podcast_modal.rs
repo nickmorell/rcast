@@ -1,4 +1,7 @@
-use egui::Color32;
+use crate::design::components::*;
+use crate::design::spacing::*;
+use crate::design::tokens::ThemeTokens;
+use crate::design::typography::*;
 
 pub struct AddPodcastModal {
     pub show: bool,
@@ -27,7 +30,7 @@ impl AddPodcastModal {
         self.error_message = None;
     }
 
-    pub fn render(&mut self, ctx: &egui::Context) -> Option<String> {
+    pub fn render(&mut self, ctx: &egui::Context, t: &ThemeTokens) -> Option<String> {
         let mut result = None;
 
         if !self.show {
@@ -38,30 +41,43 @@ impl AddPodcastModal {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .frame(
+                egui::Frame::new()
+                    .fill(t.card_bg)
+                    .stroke(egui::Stroke::new(1.0, t.border))
+                    .corner_radius(rounding_lg())
+                    .inner_margin(egui::Margin::same(CARD_PADDING as i8)),
+            )
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.set_width(400.0);
 
+                    ui.label(text_page_title("Add Podcast", t));
+                    ui.add_space(SPACE_1);
+                    ui.label(text_hint(
+                        if cfg!(target_os = "macos") {
+                            "Paste a feed URL · Tip: ⌘V"
+                        } else {
+                            "Paste a feed URL · Tip: Ctrl+V"
+                        },
+                        t,
+                    ));
+
+                    ui.add_space(SPACE_3);
+
                     if let Some(err) = &self.error_message {
-                        ui.colored_label(Color32::from_rgb(220, 80, 80), err);
-                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new(err.as_str())
+                                .size(FONT_SM)
+                                .color(t.error),
+                        );
+                        ui.add_space(SPACE_1);
                     }
 
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.url_input)
                             .hint_text("https://example.com/feed.rss")
-                            .desired_width(380.0),
-                    );
-
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(if cfg!(target_os = "macos") {
-                            "Tip: paste with ⌘V"
-                        } else {
-                            "Tip: paste with Ctrl+V"
-                        })
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(120, 120, 130)),
+                            .desired_width(f32::INFINITY),
                     );
 
                     if self.url_input.is_empty() && !response.has_focus() {
@@ -70,12 +86,12 @@ impl AddPodcastModal {
 
                     let is_valid = self.validate_url();
 
-                    ui.add_space(20.0);
+                    ui.add_space(SPACE_2);
 
-                    ui.horizontal(|ui| {
-                        let add_button = ui.add_enabled(is_valid, egui::Button::new("Add"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let add_clicked = btn_primary_enabled(ui, "Add", is_valid, t).clicked();
 
-                        if add_button.clicked()
+                        if add_clicked
                             || (response.lost_focus()
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                 && is_valid)
@@ -84,7 +100,9 @@ impl AddPodcastModal {
                             self.close();
                         }
 
-                        if ui.button("Cancel").clicked() {
+                        ui.add_space(SPACE_2);
+
+                        if btn_secondary(ui, "Cancel", t).clicked() {
                             self.close();
                         }
                     });

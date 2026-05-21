@@ -6,7 +6,7 @@ pub struct InitialMigration;
 
 impl Migration for InitialMigration {
     fn name(&self) -> &'static str {
-        return "Initial Migration";
+        "Initial Migration"
     }
 
     fn up(&self, transaction: &Transaction) -> Result<(), DatabaseError> {

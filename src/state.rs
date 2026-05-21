@@ -1,6 +1,8 @@
+use crate::chapters::Chapter;
 use crate::components::toast::ToastQueue;
 use crate::db::models::Bookmark;
 use crate::db::models::{Episode, Podcast};
+use crate::design::ThemeTokens;
 use crate::image_cache::ImageCache;
 use crate::types::{QueueDisplayItem, Settings};
 use std::collections::HashSet;
@@ -11,6 +13,8 @@ pub struct NowPlaying {
 }
 
 pub struct AppState {
+    pub theme: ThemeTokens,
+
     // Home page
     pub podcasts: Vec<Podcast>,
 
@@ -21,6 +25,7 @@ pub struct AppState {
     // Playback
     pub now_playing: Option<NowPlaying>,
     pub now_playing_episode: Option<Episode>,
+    pub now_playing_chapters: Vec<Chapter>,
 
     // Queue
     pub queue_display: Vec<QueueDisplayItem>,
@@ -44,16 +49,24 @@ pub struct AppState {
     pub toasts: ToastQueue,
 
     pub open_add_podcast_requested: bool,
+
+    // Sleep timer
+    pub sleep_timer_ends_at: Option<std::time::Instant>,
+
+    // Statistics
+    pub listening_stats: Option<crate::db::models::ListeningStats>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            theme: ThemeTokens::dark(),
             podcasts: Vec::new(),
             detail_podcast: None,
             detail_episodes: Vec::new(),
             now_playing: None,
             now_playing_episode: None,
+            now_playing_chapters: Vec::new(),
             queue_display: Vec::new(),
             settings: Settings::default(),
             image_cache: ImageCache::new(),
@@ -63,6 +76,8 @@ impl Default for AppState {
             syncing_podcast_ids: HashSet::new(),
             toasts: ToastQueue::default(),
             open_add_podcast_requested: false,
+            sleep_timer_ends_at: None,
+            listening_stats: None,
         }
     }
 }

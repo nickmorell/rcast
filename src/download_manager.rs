@@ -1,6 +1,5 @@
 use crate::db::Database;
 use crate::utils::string_utils::{sanitize_file_name, sanitize_folder_uri};
-use bytes::Bytes;
 use reqwest::blocking::Client;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,12 +18,7 @@ impl DownloadManager {
         }
     }
 
-    pub fn file_exists(&self, folders: Vec<String>, file_name: &str) -> bool {
-        self.find_file(folders, file_name).is_some()
-    }
-
-    // Returns the full path of a downloaded file if it exists, or `None`.
-    pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<std::path::PathBuf> {
+    pub fn find_file(&self, folders: Vec<String>, file_name: &str) -> Option<PathBuf> {
         let download_path = self.database.get_download_directory_sync().ok()?;
         let download_dir = construct_download_path(download_path, folders);
 
@@ -42,12 +36,13 @@ impl DownloadManager {
         None
     }
 
+    /// Downloads the file and returns the path where it was saved.
     pub fn download(
         &self,
         url: String,
         folders: Vec<String>,
         file_name: String,
-    ) -> Result<(), String> {
+    ) -> Result<PathBuf, String> {
         let download_path = self
             .database
             .get_download_directory_sync()
@@ -59,7 +54,7 @@ impl DownloadManager {
             fs::create_dir_all(&download_dir).map_err(|e| e.to_string())?;
         }
 
-        let response = self
+        let mut response = self
             .client
             .get(&url)
             .send()
@@ -74,7 +69,7 @@ impl DownloadManager {
                 v.split(';')
                     .map(str::trim)
                     .find(|p| p.to_lowercase().starts_with("filename="))
-                    .and_then(|p| p.splitn(2, '=').nth(1))
+                    .and_then(|p| p.split_once('=').map(|x| x.1))
                     .map(|f| f.trim_matches('"').to_string())
             })
             .and_then(|filename| {
@@ -93,13 +88,17 @@ impl DownloadManager {
 
         download_dir = download_dir.join(format!("{}{}", sanitize_file_name(&file_name), ext));
 
-        let bytes: Bytes = response
-            .bytes()
-            .map_err(|_| "Failed to read response bytes".to_string())?;
+        let mut file =
+            fs::File::create(&download_dir).map_err(|_| "Failed to create file".to_string())?;
+        response
+            .copy_to(&mut file)
+            .map_err(|_| "Failed to write file".to_string())?;
 
-        fs::write(&download_dir, &bytes).map_err(|_| "Failed to write file".to_string())?;
+        Ok(download_dir)
+    }
 
-        Ok(())
+    pub fn delete_file(&self, path: &str) -> Result<(), String> {
+        fs::remove_file(path).map_err(|e| e.to_string())
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "rcast"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 description = "A local-first, privacy-focused podcast client"
 homepage = "https://github.com/nickmorell/rcast"
@@ -14,24 +14,39 @@ category = "Music"
 short_description = "A local-first, privacy-focused podcast client"
 long_description = "RCast is a desktop podcast client built around a simple belief: your listening habits are your own business. No accounts, no algorithms, no cloud."
 osx_minimum_system_version = "11.0"
+icon = [
+    "assets/icons/icon-256x256.png",
+    "assets/icons/icon-128x128.png",
+    "assets/icons/icon-32x32.png"
+]
+
+[package.metadata.bundle.windows]
+wix_upgrade_guid = "CC9A64F1-AC2C-44E3-A3AB-73D397FE15DB"
+
+[package.metadata.bundle.osx]
+icon = ["assets/icons/icon.icns"]
 
 [dependencies]
-eframe = "0.33.3"
-egui = "0.33.3"
-rusqlite = { version = "0.38.0", features = ["bundled"] }
+eframe = "0.34.2"
+egui = "0.34.2"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
-egui-phosphor = "0.11"
-rss = "2.0"
-reqwest = { version = "0.13", features = ["json", "blocking"] }
-chrono = "0.4"
-image = "0.25"
-rodio = "0.22.1"
-md5 = "0.7"
-egui_alignments = "0.3.7"
+egui-phosphor = "0.12"
+rss = "2.0.13"
+reqwest = { version = "0.13.3", features = ["json", "blocking"] }
+chrono = "0.4.44"
+image = "0.25.10"
+rodio = "0.22.2"
+md5 = "0.8.0"
+egui_alignments = "0.3.8"
 url = "2.5.8"
 dirs = "6.0.0"
 rfd = "0.17.2"
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "sync", "macros", "time"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync", "macros", "time"] }
 bytes = "1.11.1"
-anyhow = "1"
-quick-xml = { version = "0.37", features = ["serialize"] }
+anyhow = "1.0.102"
+quick-xml = { version = "0.40.0", features = ["serialize"] }
+global-hotkey = "0.6"
+tray-icon = "0.19"
+muda = "0.15"
+notify-rust = "4"

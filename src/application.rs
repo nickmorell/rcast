@@ -1,4 +1,3 @@
-use egui::Context;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -7,11 +6,15 @@ use crate::commands::AppCommand;
 use crate::components::add_podcast_modal::AddPodcastModal;
 use crate::components::notes_panel::NotesPanel;
 use crate::components::toast;
+use crate::db::models::DownloadStatus;
 use crate::events::AppEvent;
+use crate::hotkeys::HotkeyManager;
 use crate::pages::{home::HomePage, podcast_detail::PodcastDetailPage, settings::SettingsPage};
 use crate::ports::{FilePicker, FolderPicker};
+use crate::design::{visuals::build_visuals, ThemeTokens};
 use crate::state::AppState;
-use crate::types::Page;
+use crate::tray::AppTray;
+use crate::types::{Page, ThemeMode};
 
 pub struct RCast {
     pub cmd_tx: UnboundedSender<AppCommand>,
@@ -28,6 +31,10 @@ pub struct RCast {
     pub home_page: HomePage,
     pub podcast_detail_page: PodcastDetailPage,
     pub settings_page: SettingsPage,
+
+    pub tray: Option<AppTray>,
+    pub hotkeys: Option<HotkeyManager>,
+    last_theme: crate::types::ThemeMode,
 }
 
 impl RCast {
@@ -37,9 +44,11 @@ impl RCast {
         audio_player: AudioPlayer,
         folder_picker: Arc<dyn FolderPicker>,
         file_picker: Arc<dyn FilePicker>,
+        tray: Option<AppTray>,
+        hotkeys: Option<HotkeyManager>,
     ) -> Self {
         let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
-
+        let _ = cmd_tx.send(AppCommand::ClearQueue);
         let mut settings_page = SettingsPage::default();
         settings_page.set_folder_picker(folder_picker);
         settings_page.set_file_picker(file_picker);
@@ -55,10 +64,13 @@ impl RCast {
             home_page: HomePage::default(),
             podcast_detail_page: PodcastDetailPage::default(),
             settings_page,
+            tray,
+            hotkeys,
+            last_theme: crate::types::ThemeMode::Dark,
         }
     }
 
-    fn handle_event(&mut self, event: AppEvent) {
+    fn handle_event(&mut self, event: AppEvent, ctx: &egui::Context) {
         match event {
             // Navigation
             AppEvent::NavigatedTo(page) => {
@@ -108,9 +120,47 @@ impl RCast {
             }
             AppEvent::SyncCompleted(podcast_id) => {
                 self.state.syncing_podcast_ids.remove(&podcast_id);
-                // Refresh the podcast's last_synced_at in the list.
-                // The orchestrator reloads podcasts after sync so this will
-                // arrive shortly as a PodcastsLoaded event.
+            }
+
+            // Per-show preferences
+            AppEvent::PodcastPreferencesUpdated { podcast_id, prefs } => {
+                if let Some(p) = self.state.detail_podcast.as_mut()
+                    && p.id == podcast_id
+                {
+                    p.speed_preset = prefs.speed_preset;
+                    p.auto_download = prefs.auto_download;
+                    p.keep_episodes_count = prefs.keep_episodes_count;
+                    p.skip_intro_seconds = prefs.skip_intro_seconds;
+                    p.skip_outro_seconds = prefs.skip_outro_seconds;
+                }
+            }
+
+            // Downloads
+            AppEvent::DownloadStatusChanged {
+                episode_id,
+                status,
+                path,
+            } => {
+                for ep in self.state.detail_episodes.iter_mut() {
+                    if ep.id == episode_id {
+                        ep.download_status = status;
+                        if let Some(ref p) = path {
+                            ep.downloaded_path = Some(p.clone());
+                        } else if status == DownloadStatus::NotDownloaded {
+                            ep.downloaded_path = None;
+                        }
+                        break;
+                    }
+                }
+                let label = match status {
+                    DownloadStatus::Downloading => None,
+                    DownloadStatus::Downloaded => Some("Downloaded"),
+                    DownloadStatus::Failed => Some("Download failed"),
+                    DownloadStatus::NotDownloaded => None,
+                };
+                if let Some(msg) = label && status == DownloadStatus::Failed {
+                    self.state.toasts.push(toast::ToastMessage::error(msg));
+                }
             }
 
             // Queue
@@ -129,21 +179,46 @@ impl RCast {
                     podcast_id,
                 });
                 self.state.now_playing_episode = Some(episode);
+                self.state.now_playing_chapters.clear();
+                self.home_page.media_state.show_chapters = false;
             }
             AppEvent::PlaybackStopped => {
                 self.state.now_playing = None;
                 self.state.now_playing_episode = None;
+                self.state.now_playing_chapters.clear();
+            }
+            AppEvent::ChaptersLoaded(chapters) => {
+                self.state.now_playing_chapters = chapters;
             }
 
             // Settings
             AppEvent::SettingsLoaded(settings) => {
-                // Apply volume immediately to the already-running audio player.
                 self.audio_player.set_volume(settings.default_volume);
+                if let Some(hk) = &mut self.hotkeys {
+                    hk.apply_settings(&settings.hotkeys);
+                }
+                self.state.theme = match settings.theme {
+                    ThemeMode::Dark => ThemeTokens::dark(),
+                    ThemeMode::Light => ThemeTokens::light(),
+                };
+                ctx.set_visuals(build_visuals(&self.state.theme));
                 self.state.settings = settings.clone();
                 self.settings_page.load(settings);
             }
             AppEvent::SettingsSaved => {
-                // SettingsSaved is followed by SettingsLoaded, which re-applies volume. Nothing else to do here.
+                let new_theme = self.state.settings.theme;
+                if new_theme != self.last_theme {
+                    self.last_theme = new_theme;
+                    self.state.theme = match new_theme {
+                        crate::types::ThemeMode::Dark => ThemeTokens::dark(),
+                        crate::types::ThemeMode::Light => ThemeTokens::light(),
+                    };
+                    ctx.set_visuals(build_visuals(&self.state.theme));
+                }
+                let hotkey_settings = self.state.settings.hotkeys.clone();
+                if let Some(hk) = &mut self.hotkeys {
+                    hk.apply_settings(&hotkey_settings);
+                }
             }
 
             AppEvent::OpmlImported {
@@ -208,6 +283,13 @@ impl RCast {
                 self.state.notes_podcast_bookmarks.retain(|b| b.id != id);
             }
 
+            AppEvent::SleepTimerUpdated(ends_at) => {
+                self.state.sleep_timer_ends_at = ends_at;
+            }
+            AppEvent::ListeningStatsLoaded(stats) => {
+                self.state.listening_stats = Some(stats);
+            }
+
             // Cross-cutting
             AppEvent::Toast(msg) => {
                 self.state.toasts.push(msg);
@@ -219,21 +301,25 @@ impl RCast {
     }
 
     fn poll_audio(&mut self) {
-        // Autoplay next in queue when the current track finishes.
-        if self.audio_player.is_finished()
-            && self.state.settings.auto_play_next
-            && self.state.now_playing.is_some()
-        {
-            let current_id = self.audio_player.get_current_episode_id();
-            // Guard against triggering multiple times for the same finish.
-            if current_id != self.state.now_playing.as_ref().map(|_| -1) {
+        if self.audio_player.is_finished() && self.state.now_playing.is_some() {
+            let episode_id = self.audio_player.get_current_episode_id();
+            // Clear now_playing first — prevents this block from re-firing next frame
+            // before the orchestrator responds.
+            self.state.now_playing = None;
+            self.state.now_playing_episode = None;
+
+            if self.state.settings.auto_play_next {
+                // PlayNextInQueue calls complete_episode internally.
                 let _ = self.cmd_tx.send(AppCommand::PlayNextInQueue);
+            } else if let Some(ep_id) = episode_id {
+                // No auto-play: mark as played and let the player idle.
+                let _ = self.cmd_tx.send(AppCommand::CompleteEpisode(ep_id));
             }
+            return;
         }
 
-        // Reset now_playing when audio stops without autoplay.
-        if !self.audio_player.is_finished()
-            && self.audio_player.get_state() == PlaybackState::Stopped
+        // Reset now_playing when the user manually stops (Stopped state, not finished).
+        if self.audio_player.get_state() == PlaybackState::Stopped
             && self.state.now_playing.is_some()
         {
             self.state.now_playing = None;
@@ -242,10 +328,21 @@ impl RCast {
 }
 
 impl eframe::App for RCast {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Drain all pending background events
         while let Ok(event) = self.event_rx.try_recv() {
-            self.handle_event(event);
+            self.handle_event(event, ctx);
+        }
+
+        // Poll system tray events
+        if let Some(tray) = &self.tray {
+            tray.poll(&self.cmd_tx, ctx);
+        }
+
+        // Poll global hotkey events
+        if let Some(hk) = &self.hotkeys {
+            let focused = ctx.input(|i| i.focused);
+            hk.poll(&self.cmd_tx, focused);
         }
 
         // Check if any page requested the Add Podcast modal
@@ -270,51 +367,42 @@ impl eframe::App for RCast {
         // Poll audio player for autoplay / stop detection
         self.poll_audio();
 
-        // Request repaints while audio is playing so the seek bar stays smooth.
+        // Request repaints while audio is playing so the seek bar stays smooth
         if self.audio_player.get_state() == PlaybackState::Playing {
             ctx.request_repaint();
         }
+    }
 
-        // Menu bar
-        if crate::components::menu::render(ctx, &self.cmd_tx) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Menu bar — must use show_inside(ui) not show(ctx) in eframe's split fn ui()
+        if crate::components::menu::render(ui, &self.cmd_tx) {
             self.add_podcast_modal.open();
         }
+
+        let ctx = ui.ctx().clone();
 
         // Notes panel
         {
             let now_playing_id = self.state.now_playing.as_ref().map(|np| np.episode_id);
             let current_pos = self.audio_player.get_position().as_secs_f64();
             self.notes_panel.render(
-                ctx,
+                ui,
                 &self.state.notes_episode_bookmarks,
                 &self.state.notes_podcast_bookmarks,
                 now_playing_id,
                 current_pos,
                 &self.cmd_tx,
+                &self.state.theme,
             );
             if let Some(seek_to) = self.notes_panel.seek_request.take() {
                 self.audio_player.seek(seek_to);
             }
         }
 
-        // Active page
-        egui::CentralPanel::default().show(ctx, |ui| match self.current_page.clone() {
-            Page::Home => {
-                self.home_page.render(ui, &mut self.state, &self.cmd_tx);
-            }
-            Page::PodcastDetail(_) => {
-                self.podcast_detail_page
-                    .render(ui, &mut self.state, &self.cmd_tx);
-            }
-            Page::Settings => {
-                self.settings_page.render(ui, &mut self.state, &self.cmd_tx);
-            }
-        });
-
         // Media controls
-        egui::TopBottomPanel::bottom("media_controls")
-            .min_height(80.0)
-            .show(ctx, |ui| {
+        egui::Panel::bottom("media_controls")
+            .min_size(80.0)
+            .show_inside(ui, |ui| {
                 ui.add_space(5.0);
 
                 let current_podcast_image = self.state.now_playing.as_ref().and_then(|np| {
@@ -335,22 +423,35 @@ impl eframe::App for RCast {
                         .map(|p| p.title.clone())
                 });
 
-                use crate::components::media_controls::{MediaControls, MediaControlsAction};
+                let now_playing_podcast_id =
+                    self.state.now_playing.as_ref().map(|np| np.podcast_id);
+                let now_playing_episode_id =
+                    self.state.now_playing.as_ref().map(|np| np.episode_id);
 
-                let mut volume = self.state.settings.default_volume;
+                use crate::components::media_controls::{
+                    MediaControls, MediaControlsAction, NowPlayingContext,
+                };
+
+                // Sync volume from settings into media state before rendering.
+                self.home_page.media_state.volume = self.state.settings.default_volume;
+
+                let now_playing_ctx = NowPlayingContext {
+                    episode: current_episode.as_ref(),
+                    podcast_title: current_podcast_title.as_deref(),
+                    podcast_image: current_podcast_image.as_deref(),
+                    chapters: &self.state.now_playing_chapters,
+                    queue_items: &self.state.queue_display,
+                    image_cache: &self.state.image_cache,
+                    sleep_timer_ends_at: self.state.sleep_timer_ends_at,
+                    notes_open: self.notes_panel.visible,
+                };
+
                 let action = MediaControls::render(
                     ui,
                     &self.audio_player,
-                    &self.state.queue_display,
-                    &self.state.image_cache,
-                    &self.state.settings,
-                    current_episode.as_ref(),
-                    current_podcast_title.as_deref(),
-                    current_podcast_image.as_deref(),
-                    &mut volume,
-                    &mut self.home_page.show_queue,
-                    &mut self.home_page.show_speed_menu,
-                    self.notes_panel.visible,
+                    &now_playing_ctx,
+                    &mut self.home_page.media_state,
+                    &self.state.theme,
                 );
 
                 match action {
@@ -358,7 +459,6 @@ impl eframe::App for RCast {
                         if self.notes_panel.visible {
                             self.notes_panel.close();
                         } else if let Some(np) = &self.state.now_playing {
-                            // Open panel for the currently playing episode.
                             let title = self
                                 .state
                                 .detail_episodes
@@ -392,9 +492,32 @@ impl eframe::App for RCast {
                     }
                     MediaControlsAction::SetSpeed(speed) => {
                         self.audio_player.set_speed(speed);
+                        // Persist speed to the current episode
+                        if let Some(ep_id) = now_playing_episode_id {
+                            let _ = self.cmd_tx.send(AppCommand::SetEpisodeSpeedPreset {
+                                episode_id: ep_id,
+                                speed: Some(speed),
+                            });
+                        }
+                    }
+                    MediaControlsAction::SetShowDefaultSpeed(speed) => {
+                        self.audio_player.set_speed(speed);
+                        if let Some(podcast_id) = now_playing_podcast_id {
+                            use crate::types::PodcastPreferences;
+                            let _ = self.cmd_tx.send(AppCommand::UpdatePodcastPreferences {
+                                podcast_id,
+                                prefs: PodcastPreferences {
+                                    speed_preset: Some(speed),
+                                    ..Default::default()
+                                },
+                            });
+                        }
                     }
                     MediaControlsAction::RemoveFromQueue(queue_id) => {
                         let _ = self.cmd_tx.send(AppCommand::RemoveFromQueue(queue_id));
+                    }
+                    MediaControlsAction::SetSleepTimer(mins) => {
+                        let _ = self.cmd_tx.send(AppCommand::SetSleepTimer(mins));
                     }
                     MediaControlsAction::None => {}
                 }
@@ -402,12 +525,27 @@ impl eframe::App for RCast {
                 ui.add_space(5.0);
             });
 
+        // Active page
+        egui::CentralPanel::default().show_inside(ui, |ui| match self.current_page.clone() {
+            Page::Home => {
+                self.home_page.render(ui, &mut self.state, &self.cmd_tx);
+            }
+            Page::PodcastDetail(_) => {
+                let is_paused = self.audio_player.get_state() == PlaybackState::Paused;
+                self.podcast_detail_page
+                    .render(ui, &mut self.state, &self.cmd_tx, is_paused);
+            }
+            Page::Settings => {
+                self.settings_page.render(ui, &mut self.state, &self.cmd_tx);
+            }
+        });
+
         // Add Podcast modal
-        if let Some(url) = self.add_podcast_modal.render(ctx) {
+        if let Some(url) = self.add_podcast_modal.render(&ctx, &self.state.theme) {
             let _ = self.cmd_tx.send(AppCommand::AddPodcast { feed_url: url });
         }
 
         // Toast overlay
-        toast::render(ctx, &mut self.state.toasts);
+        toast::render(&ctx, &mut self.state.toasts, &self.state.theme);
     }
 }

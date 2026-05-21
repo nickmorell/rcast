@@ -9,8 +9,8 @@ use rusqlite::{Connection, params};
 
 use crate::errors::DatabaseError;
 use crate::migrations::run_migrations;
-use crate::types::{HomeDensity, QueueDisplayItem, QueueItem, Settings};
-use models::{Bookmark, Episode, Podcast};
+use crate::types::{HomeDensity, PodcastPreferences, QueueDisplayItem, QueueItem, Settings, ThemeMode, TrimSilenceMode};
+use models::{Bookmark, DownloadStatus, Episode, Podcast};
 
 #[derive(Clone)]
 pub struct Database {
@@ -44,10 +44,9 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT p.id, p.url, p.title, p.description, p.image_url,
                         p.last_synced_at, p.created_at, p.updated_at,
-                        COUNT(e.id) as episode_count
+                        p.speed_preset, p.auto_download, p.keep_episodes_count,
+                        p.skip_intro_seconds, p.skip_outro_seconds
                  FROM podcasts p
-                 LEFT JOIN episodes e ON e.podcast_id = p.id
-                 GROUP BY p.id
                  ORDER BY p.title",
             )?;
 
@@ -62,7 +61,12 @@ impl Database {
                         last_synced_at: row.get(5)?,
                         created_at: row.get(6)?,
                         updated_at: row.get(7)?,
-                        episode_count: row.get(8)?,
+                        episode_count: 0,
+                        speed_preset: row.get(8)?,
+                        auto_download: row.get::<_, Option<i32>>(9)?.map(|v| v != 0),
+                        keep_episodes_count: row.get(10)?,
+                        skip_intro_seconds: row.get::<_, Option<i32>>(11)?.unwrap_or(0),
+                        skip_outro_seconds: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -79,7 +83,9 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT p.id, p.url, p.title, p.description, p.image_url,
                         p.last_synced_at, p.created_at, p.updated_at,
-                        COUNT(e.id) as episode_count
+                        COUNT(e.id) as episode_count,
+                        p.speed_preset, p.auto_download, p.keep_episodes_count,
+                        p.skip_intro_seconds, p.skip_outro_seconds
                  FROM podcasts p
                  LEFT JOIN episodes e ON e.podcast_id = p.id
                  WHERE p.id = ?
@@ -97,6 +103,11 @@ impl Database {
                     created_at: row.get(6)?,
                     updated_at: row.get(7)?,
                     episode_count: row.get(8)?,
+                    speed_preset: row.get(9)?,
+                    auto_download: row.get::<_, Option<i32>>(10)?.map(|v| v != 0),
+                    keep_episodes_count: row.get(11)?,
+                    skip_intro_seconds: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
+                    skip_outro_seconds: row.get::<_, Option<i32>>(13)?.unwrap_or(0),
                 })
             })?;
 
@@ -133,7 +144,6 @@ impl Database {
         .await?
     }
 
-    // Stamps `last_synced_at` with the current time after a successful sync.
     pub async fn update_podcast_synced_at(&self, podcast_id: i32) -> anyhow::Result<()> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -142,6 +152,39 @@ impl Database {
             conn.execute(
                 "UPDATE podcasts SET last_synced_at = ?1, updated_at = ?1 WHERE id = ?2",
                 params![now, podcast_id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn update_podcast_preferences(
+        &self,
+        podcast_id: i32,
+        prefs: PodcastPreferences,
+    ) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "UPDATE podcasts SET
+                    speed_preset = ?1,
+                    auto_download = ?2,
+                    keep_episodes_count = ?3,
+                    skip_intro_seconds = ?4,
+                    skip_outro_seconds = ?5,
+                    updated_at = ?6
+                 WHERE id = ?7",
+                params![
+                    prefs.speed_preset,
+                    prefs.auto_download.map(|b| b as i32),
+                    prefs.keep_episodes_count,
+                    prefs.skip_intro_seconds,
+                    prefs.skip_outro_seconds,
+                    now,
+                    podcast_id,
+                ],
             )?;
             Ok(())
         })
@@ -167,7 +210,9 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
-                        created_at, updated_at
+                        created_at, updated_at,
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
                  FROM episodes
                  WHERE podcast_id = ?
                  ORDER BY publish_date DESC",
@@ -188,6 +233,14 @@ impl Database {
                         position_seconds: row.get(9)?,
                         created_at: row.get(10)?,
                         updated_at: row.get(11)?,
+                        download_status: row
+                            .get::<_, Option<String>>(12)?
+                            .map(|s| DownloadStatus::from_str(&s))
+                            .unwrap_or_default(),
+                        downloaded_path: row.get(13)?,
+                        speed_preset: row.get(14)?,
+                        chapters_url: row.get(15)?,
+                        total_listen_seconds: row.get(16)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -204,7 +257,9 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT id, podcast_id, title, description, url, audio_type,
                         publish_date, is_played, duration, position_seconds,
-                        created_at, updated_at
+                        created_at, updated_at,
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
                  FROM episodes WHERE id = ?",
             )?;
 
@@ -222,6 +277,14 @@ impl Database {
                     position_seconds: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
+                    download_status: row
+                        .get::<_, Option<String>>(12)?
+                        .map(|s| DownloadStatus::from_str(&s))
+                        .unwrap_or_default(),
+                    downloaded_path: row.get(13)?,
+                    speed_preset: row.get(14)?,
+                    chapters_url: row.get(15)?,
+                    total_listen_seconds: row.get(16)?,
                 })
             })?;
 
@@ -230,19 +293,21 @@ impl Database {
         .await?
     }
 
-    pub async fn insert_episodes(&self, episodes: Vec<Episode>) -> anyhow::Result<()> {
+    // Returns the IDs of newly inserted episodes (episodes that didn't exist before).
+    pub async fn insert_episodes(&self, episodes: Vec<Episode>) -> anyhow::Result<Vec<i32>> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
             let tx = conn.transaction()?;
+            let mut new_ids = Vec::new();
 
             for ep in &episodes {
                 tx.execute(
                     "INSERT OR IGNORE INTO episodes
                         (podcast_id, title, description, url, audio_type,
                          publish_date, is_played, duration, position_seconds,
-                         created_at, updated_at)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0.0,?9,?10)",
+                         created_at, updated_at, chapters_url)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0.0,?9,?10,?11)",
                     params![
                         ep.podcast_id,
                         ep.title,
@@ -254,12 +319,23 @@ impl Database {
                         ep.duration,
                         ep.created_at,
                         ep.updated_at,
+                        ep.chapters_url,
                     ],
                 )?;
+                if tx.changes() > 0 {
+                    new_ids.push(tx.last_insert_rowid() as i32);
+                } else if ep.chapters_url.is_some() {
+                    // Episode already exists — backfill chapters_url if it wasn't set before.
+                    tx.execute(
+                        "UPDATE episodes SET chapters_url = ?1
+                         WHERE podcast_id = ?2 AND url = ?3 AND chapters_url IS NULL",
+                        params![ep.chapters_url, ep.podcast_id, ep.url],
+                    )?;
+                }
             }
 
             tx.commit()?;
-            Ok(())
+            Ok(new_ids)
         })
         .await?
     }
@@ -282,11 +358,6 @@ impl Database {
         .await?
     }
 
-    /**
-        Saves the current playback position for an episode. Called periodically
-        while playing and on pause. Only writes if the position has changed by
-        more than 5 seconds to avoid unnecessary DB churn.
-    */
     pub async fn update_episode_position(
         &self,
         episode_id: i32,
@@ -305,10 +376,43 @@ impl Database {
         .await?
     }
 
-    /**
-        Marks an episode as fully played and resets its saved position to zero.
-        Called when an episode finishes naturally (end of track or autoplay kicks in).
-    */
+    pub async fn update_episode_download_status(
+        &self,
+        episode_id: i32,
+        status: DownloadStatus,
+        path: Option<String>,
+    ) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "UPDATE episodes SET download_status = ?1, downloaded_path = ?2, updated_at = ?3 WHERE id = ?4",
+                params![status.as_str(), path, now, episode_id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn update_episode_speed_preset(
+        &self,
+        episode_id: i32,
+        speed: Option<f32>,
+    ) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "UPDATE episodes SET speed_preset = ?1, updated_at = ?2 WHERE id = ?3",
+                params![speed, now, episode_id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
     pub async fn complete_episode(&self, episode_id: i32) -> anyhow::Result<()> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -325,12 +429,56 @@ impl Database {
         .await?
     }
 
+    // Returns downloaded episodes for a podcast ordered newest-first (for retention pruning).
+    pub async fn get_downloaded_episodes(
+        &self,
+        podcast_id: i32,
+    ) -> anyhow::Result<Vec<Episode>> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, podcast_id, title, description, url, audio_type,
+                        publish_date, is_played, duration, position_seconds,
+                        created_at, updated_at,
+                        download_status, downloaded_path, speed_preset, chapters_url,
+                        total_listen_seconds
+                 FROM episodes
+                 WHERE podcast_id = ? AND download_status = 'downloaded'
+                 ORDER BY publish_date DESC",
+            )?;
+
+            let episodes = stmt
+                .query_map([podcast_id], |row| {
+                    Ok(Episode {
+                        id: row.get(0)?,
+                        podcast_id: row.get(1)?,
+                        title: row.get(2)?,
+                        description: row.get(3)?,
+                        url: row.get(4)?,
+                        audio_type: row.get(5)?,
+                        publish_date: row.get(6)?,
+                        is_played: row.get::<_, i32>(7)? != 0,
+                        duration: row.get(8)?,
+                        position_seconds: row.get(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                        download_status: DownloadStatus::Downloaded,
+                        downloaded_path: row.get(13)?,
+                        speed_preset: row.get(14)?,
+                        chapters_url: row.get(15)?,
+                        total_listen_seconds: row.get(16)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(episodes)
+        })
+        .await?
+    }
+
     // Bookmarks
 
-    /**
-        Returns all bookmarks for a specific episode, ordered by position then
-        creation time. Includes both timed and untimed episode notes.
-    */
     pub async fn get_bookmarks_for_episode(
         &self,
         episode_id: i32,
@@ -365,7 +513,6 @@ impl Database {
         .await?
     }
 
-    // Returns podcast-level notes (episode_id IS NULL) for a podcast.
     pub async fn get_podcast_bookmarks(&self, podcast_id: i32) -> anyhow::Result<Vec<Bookmark>> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -474,7 +621,6 @@ impl Database {
         .await?
     }
 
-    // Returns queue items with denormalised episode and podcast titles for display.
     pub async fn get_queue_with_details(&self) -> anyhow::Result<Vec<QueueDisplayItem>> {
         let conn = self.connection.clone();
         tokio::task::spawn_blocking(move || {
@@ -533,6 +679,16 @@ impl Database {
         .await?
     }
 
+    pub async fn clear_queue(&self) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            conn.execute("DELETE FROM queue", [])?;
+            Ok(())
+        })
+        .await?
+    }
+
     // Settings
 
     pub async fn get_settings(&self) -> anyhow::Result<Settings> {
@@ -566,6 +722,35 @@ impl Database {
                             _ => HomeDensity::Grid,
                         }
                     }
+                    "default_speed" => settings.default_speed = row.1.parse().unwrap_or(1.0),
+                    "trim_silence_mode" => {
+                        settings.trim_silence_mode = match row.1.as_str() {
+                            "smart_speed" => TrimSilenceMode::SmartSpeed,
+                            "skip_silence" => TrimSilenceMode::SkipSilence,
+                            _ => TrimSilenceMode::Off,
+                        }
+                    }
+                    "auto_download_new_episodes" => {
+                        settings.auto_download_new_episodes = row.1 == "true"
+                    }
+                    "global_keep_episodes_count" => {
+                        settings.global_keep_episodes_count = row.1.parse().unwrap_or(0)
+                    }
+                    "hotkey_play_pause" => settings.hotkeys.play_pause = row.1,
+                    "hotkey_next" => settings.hotkeys.next = row.1,
+                    "hotkey_prev" => settings.hotkeys.prev = row.1,
+                    "hotkey_skip_forward" => settings.hotkeys.skip_forward = row.1,
+                    "hotkey_skip_backward" => settings.hotkeys.skip_backward = row.1,
+                    "notify_new_episodes" => settings.notify_new_episodes = row.1 == "true",
+                    "notify_download_complete" => {
+                        settings.notify_download_complete = row.1 == "true"
+                    }
+                    "theme" => {
+                        settings.theme = match row.1.as_str() {
+                            "light" => ThemeMode::Light,
+                            _ => ThemeMode::Dark,
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -580,20 +765,17 @@ impl Database {
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
 
+            let trim_str = match settings.trim_silence_mode {
+                TrimSilenceMode::Off => "off",
+                TrimSilenceMode::SmartSpeed => "smart_speed",
+                TrimSilenceMode::SkipSilence => "skip_silence",
+            };
+
             let rows: &[(&str, String)] = &[
                 ("default_volume", settings.default_volume.to_string()),
-                (
-                    "skip_backward_seconds",
-                    settings.skip_backward_seconds.to_string(),
-                ),
-                (
-                    "skip_forward_seconds",
-                    settings.skip_forward_seconds.to_string(),
-                ),
-                (
-                    "sync_interval_minutes",
-                    settings.sync_interval_minutes.to_string(),
-                ),
+                ("skip_backward_seconds", settings.skip_backward_seconds.to_string()),
+                ("skip_forward_seconds", settings.skip_forward_seconds.to_string()),
+                ("sync_interval_minutes", settings.sync_interval_minutes.to_string()),
                 ("auto_play_next", settings.auto_play_next.to_string()),
                 ("download_directory", settings.download_directory.clone()),
                 (
@@ -601,6 +783,24 @@ impl Database {
                     match settings.home_density {
                         HomeDensity::Grid => "grid".to_string(),
                         HomeDensity::List => "list".to_string(),
+                    },
+                ),
+                ("default_speed", settings.default_speed.to_string()),
+                ("trim_silence_mode", trim_str.to_string()),
+                ("auto_download_new_episodes", settings.auto_download_new_episodes.to_string()),
+                ("global_keep_episodes_count", settings.global_keep_episodes_count.to_string()),
+                ("hotkey_play_pause", settings.hotkeys.play_pause.clone()),
+                ("hotkey_next", settings.hotkeys.next.clone()),
+                ("hotkey_prev", settings.hotkeys.prev.clone()),
+                ("hotkey_skip_forward", settings.hotkeys.skip_forward.clone()),
+                ("hotkey_skip_backward", settings.hotkeys.skip_backward.clone()),
+                ("notify_new_episodes", settings.notify_new_episodes.to_string()),
+                ("notify_download_complete", settings.notify_download_complete.to_string()),
+                (
+                    "theme",
+                    match settings.theme {
+                        ThemeMode::Dark => "dark".to_string(),
+                        ThemeMode::Light => "light".to_string(),
                     },
                 ),
             ];
@@ -613,6 +813,52 @@ impl Database {
             }
 
             Ok(())
+        })
+        .await?
+    }
+
+    // Listening statistics
+
+    pub async fn increment_listen_seconds(
+        &self,
+        episode_id: i32,
+        secs: u64,
+    ) -> anyhow::Result<()> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+            conn.execute(
+                "UPDATE episodes SET total_listen_seconds = total_listen_seconds + ?2 WHERE id = ?1",
+                params![episode_id, secs as i64],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn get_listening_stats(&self) -> anyhow::Result<models::ListeningStats> {
+        let conn = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| anyhow!("Lock error: {e}"))?;
+
+            let (total_listen_seconds, episodes_completed, total_episodes) = conn.query_row(
+                "SELECT COALESCE(SUM(total_listen_seconds), 0),
+                        COUNT(CASE WHEN is_played = 1 THEN 1 END),
+                        COUNT(*)
+                 FROM episodes",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            )?;
+
+            let total_podcasts: i64 =
+                conn.query_row("SELECT COUNT(*) FROM podcasts", [], |row| row.get(0))?;
+
+            Ok(models::ListeningStats {
+                total_listen_seconds,
+                episodes_completed,
+                total_podcasts,
+                total_episodes,
+            })
         })
         .await?
     }

@@ -1,3 +1,5 @@
+use crate::trim_silence::TrimSilenceSource;
+use crate::types::TrimSilenceMode;
 use bytes::Bytes;
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
@@ -19,6 +21,7 @@ pub struct AudioPlayer {
     playback_speed: Arc<Mutex<f32>>,
     state: Arc<Mutex<PlaybackState>>,
     duration: Arc<Mutex<Duration>>,
+    trim_silence_mode: Arc<Mutex<TrimSilenceMode>>,
 }
 
 impl AudioPlayer {
@@ -29,7 +32,12 @@ impl AudioPlayer {
             playback_speed: Arc::new(Mutex::new(1.0)),
             state: Arc::new(Mutex::new(PlaybackState::Stopped)),
             duration: Arc::new(Mutex::new(Duration::from_secs(0))),
+            trim_silence_mode: Arc::new(Mutex::new(TrimSilenceMode::Off)),
         }
+    }
+
+    pub fn set_trim_silence_mode(&self, mode: TrimSilenceMode) {
+        *self.trim_silence_mode.lock().unwrap() = mode;
     }
 
     pub fn play_from_file(&self, path: &str, episode_id: i32) -> Result<(), String> {
@@ -43,7 +51,8 @@ impl AudioPlayer {
                 .unwrap_or(Duration::ZERO)
         });
 
-        self.start_source(source, episode_id, duration)
+        let boxed: Box<dyn Source<Item = f32> + Send + 'static> = Box::new(source);
+        self.start_source(boxed, episode_id, duration)
     }
 
     pub fn play_from_memory(&self, bytes: Bytes, episode_id: i32) -> Result<(), String> {
@@ -54,13 +63,16 @@ impl AudioPlayer {
             .total_duration()
             .unwrap_or_else(|| estimate_duration(&bytes).unwrap_or(Duration::ZERO));
 
-        self.start_source(source, episode_id, duration)
+        let boxed: Box<dyn Source<Item = f32> + Send + 'static> = Box::new(source);
+        self.start_source(boxed, episode_id, duration)
     }
 
-    fn start_source<S>(&self, source: S, episode_id: i32, duration: Duration) -> Result<(), String>
-    where
-        S: Source<Item = f32> + Send + 'static,
-    {
+    fn start_source(
+        &self,
+        source: Box<dyn Source<Item = f32> + Send + 'static>,
+        episode_id: i32,
+        duration: Duration,
+    ) -> Result<(), String> {
         let mut player_guard = self.player.lock().unwrap();
 
         if let Some((old_player, _)) = player_guard.take() {
@@ -69,9 +81,18 @@ impl AudioPlayer {
 
         let mut stream = DeviceSinkBuilder::open_default_sink().map_err(|e| e.to_string())?;
         stream.log_on_drop(false);
-        let new_player = Player::connect_new(&stream.mixer());
+        let new_player = Player::connect_new(stream.mixer());
         let speed = *self.playback_speed.lock().unwrap();
-        new_player.append(source.speed(speed));
+        let trim_mode = *self.trim_silence_mode.lock().unwrap();
+
+        match trim_mode {
+            TrimSilenceMode::Off => {
+                new_player.append(source.speed(speed));
+            }
+            mode => {
+                new_player.append(TrimSilenceSource::new(source, mode).speed(speed));
+            }
+        }
         new_player.play();
 
         *player_guard = Some((new_player, stream));
@@ -118,9 +139,7 @@ impl AudioPlayer {
     }
 
     pub fn seek(&self, position: Duration) {
-        println!("seek: Seeking to {:?}", position);
         if let Some((player, _)) = self.player.lock().unwrap().as_ref() {
-            println!("seek: Attempting to seek to {:?}", position);
             player.try_seek(position).ok();
         }
     }
@@ -174,23 +193,12 @@ impl AudioPlayer {
     }
 }
 
-/**
-    Estimates playback duration from raw audio bytes.
-
-    For MP3 files, parses the first valid frame header to extract the bitrate,
-    then divides total file size by bytes-per-second. This is accurate for CBR
-    files and a reasonable estimate for VBR. Runs in microseconds.
-
-    Returns `None` if the format is unrecognised or the header is malformed.
-*/
 fn estimate_duration(bytes: &[u8]) -> Option<Duration> {
     if bytes.len() < 4 {
         return None;
     }
 
-    // Skip ID3v2 tag if present (starts with "ID3").
     let start = if bytes.starts_with(b"ID3") {
-        // ID3v2 size is encoded as a 4-byte syncsafe integer at offset 6.
         if bytes.len() < 10 {
             return None;
         }
@@ -203,7 +211,6 @@ fn estimate_duration(bytes: &[u8]) -> Option<Duration> {
         0
     };
 
-    // Scan for the first MP3 sync word (0xFF followed by 0xE0–0xFF).
     let search = &bytes[start.min(bytes.len())..];
     let frame_start = search
         .windows(2)
@@ -217,15 +224,9 @@ fn estimate_duration(bytes: &[u8]) -> Option<Duration> {
     let mpeg_version = (header[1] >> 3) & 0x03;
     let bitrate_index = (header[2] >> 4) as usize;
 
-    // Bitrate table: [version_index][bitrate_index] in kbps.
-    // version_index 0 = MPEG2/2.5, 1 = MPEG1.
     let bitrate_table: [[u32; 16]; 2] = [
-        [
-            0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
-        ], // MPEG2/2.5
-        [
-            0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
-        ], // MPEG1
+        [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
+        [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
     ];
 
     let version_idx = if mpeg_version == 3 { 1 } else { 0 };

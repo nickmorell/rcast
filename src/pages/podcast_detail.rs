@@ -2,20 +2,35 @@ use egui::Ui;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
-use crate::db::models::Episode;
+use crate::db::models::{DownloadStatus, Episode};
+use crate::design::components::*;
+use crate::design::spacing::*;
+use crate::design::typography::*;
 use crate::state::AppState;
-use crate::types::{Page, SortOrder};
+use crate::types::{Page, PodcastPreferences, SortOrder};
+use crate::utils::string_utils::strip_html;
 
-#[derive(Default)]
 pub struct PodcastDetailPage {
     search_query: String,
     sort_order: SortOrder,
     description_expanded: bool,
+    prefs_open: bool,
+    working_prefs: PodcastPreferences,
+    prefs_loaded_for: Option<i32>,
+    confirm_remove: bool,
 }
 
-impl Default for SortOrder {
+impl Default for PodcastDetailPage {
     fn default() -> Self {
-        SortOrder::PublishDateDesc
+        Self {
+            search_query: String::new(),
+            sort_order: SortOrder::PublishDateDesc,
+            description_expanded: false,
+            prefs_open: false,
+            working_prefs: PodcastPreferences::default(),
+            prefs_loaded_for: None,
+            confirm_remove: false,
+        }
     }
 }
 
@@ -25,30 +40,41 @@ impl PodcastDetailPage {
         ui: &mut Ui,
         state: &mut AppState,
         cmd_tx: &UnboundedSender<AppCommand>,
+        is_paused: bool,
     ) {
-        // Loading state
         let Some(podcast) = state.detail_podcast.clone() else {
             ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
+                ui.add_space(SPACE_7);
                 ui.spinner();
                 ui.label("Loading...");
             });
             return;
         };
 
-        ui.vertical(|ui| {
-            ui.add_space(10.0);
+        let t = state.theme.clone();
 
-            // Header
+        if self.prefs_loaded_for != Some(podcast.id) {
+            self.working_prefs = PodcastPreferences {
+                speed_preset: podcast.speed_preset,
+                auto_download: podcast.auto_download,
+                keep_episodes_count: podcast.keep_episodes_count,
+                skip_intro_seconds: podcast.skip_intro_seconds,
+                skip_outro_seconds: podcast.skip_outro_seconds,
+            };
+            self.prefs_loaded_for = Some(podcast.id);
+            self.confirm_remove = false;
+        }
+
+        ui.vertical(|ui| {
+            ui.add_space(SPACE_3);
+
+            // ── Header ────────────────────────────────────────────────────────
             ui.horizontal(|ui| {
-                if ui
-                    .button(format!("{} Back", egui_phosphor::regular::ARROW_LEFT))
-                    .clicked()
-                {
+                if btn_back(ui, &t).clicked() {
                     let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
                 }
 
-                ui.add_space(20.0);
+                ui.add_space(SPACE_5);
 
                 let texture = state
                     .image_cache
@@ -57,64 +83,242 @@ impl PodcastDetailPage {
 
                 ui.add(egui::Image::new(&texture).max_size(egui::vec2(200.0, 200.0)));
 
-                ui.add_space(20.0);
+                ui.add_space(SPACE_5);
 
                 ui.vertical(|ui| {
                     ui.set_max_width(600.0);
-                    ui.heading(&podcast.title);
-                    ui.add_space(10.0);
+                    ui.label(text_page_title(&podcast.title, &t));
+                    ui.add_space(SPACE_2);
 
-                    let should_truncate = podcast.description.len() > 250;
+                    // Strip HTML before displaying description
+                    let clean_desc = strip_html(&podcast.description);
+                    let should_truncate = clean_desc.len() > 250;
 
                     if should_truncate && !self.description_expanded {
-                        let end = podcast
-                            .description
+                        let end = clean_desc
                             .char_indices()
                             .nth(250)
                             .map(|(i, _)| i)
-                            .unwrap_or(podcast.description.len());
-                        let truncated = format!("{}...", &podcast.description[..end]);
-                        ui.label(truncated);
+                            .unwrap_or(clean_desc.len());
+                        let truncated = format!("{}...", &clean_desc[..end]);
+                        ui.label(text_body(truncated, &t));
 
-                        if ui
-                            .button(format!("{} Expand", egui_phosphor::regular::CARET_DOWN))
-                            .clicked()
+                        if btn_ghost(
+                            ui,
+                            &format!("{} Expand", egui_phosphor::regular::CARET_DOWN),
+                            &t,
+                        )
+                        .clicked()
                         {
                             self.description_expanded = true;
                         }
                     } else {
-                        ui.label(&podcast.description);
+                        ui.label(text_body(&clean_desc, &t));
                         if should_truncate
-                            && ui
-                                .button(format!("{} Collapse", egui_phosphor::regular::CARET_UP))
-                                .clicked()
+                            && btn_ghost(
+                                ui,
+                                &format!("{} Collapse", egui_phosphor::regular::CARET_UP),
+                                &t,
+                            )
+                            .clicked()
                         {
                             self.description_expanded = false;
                         }
                     }
 
-                    if ui.button("Play All").clicked() {
+                    ui.add_space(SPACE_2);
+
+                    if btn_primary(ui, "Play All", &t).clicked() {
                         let filtered = self.filtered_episodes(&state.detail_episodes);
                         if !filtered.is_empty() {
                             let ids: Vec<i32> = filtered.iter().map(|e| e.id).collect();
                             let _ = cmd_tx.send(AppCommand::PlayAll(ids));
                         }
                     }
+
+                    ui.add_space(SPACE_2);
+
+                    if self.confirm_remove {
+                        ui.horizontal(|ui| {
+                            if btn_destructive(
+                                ui,
+                                &format!(
+                                    "{} Confirm Remove?",
+                                    egui_phosphor::regular::WARNING
+                                ),
+                                &t,
+                            )
+                            .on_hover_text(
+                                "Deletes the podcast, all episodes, and any downloaded files",
+                            )
+                            .clicked()
+                            {
+                                let _ = cmd_tx.send(AppCommand::RemovePodcast(podcast.id));
+                                let _ = cmd_tx.send(AppCommand::NavigateTo(Page::Home));
+                            }
+                            ui.add_space(SPACE_2);
+                            if btn_secondary(ui, "Cancel", &t).clicked() {
+                                self.confirm_remove = false;
+                            }
+                        });
+                    } else if btn_secondary(
+                        ui,
+                        &format!("{} Remove Podcast", egui_phosphor::regular::TRASH),
+                        &t,
+                    )
+                    .clicked()
+                    {
+                        self.confirm_remove = true;
+                    }
                 });
             });
 
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(SPACE_5);
+            divider(ui, &t);
 
-            // Episode filter bar
+            // ── Per-show preferences panel ────────────────────────────────────
+            let podcast_id = podcast.id;
+            let prefs_header = egui::CollapsingHeader::new(
+                egui::RichText::new(format!(
+                    "{}  Podcast Settings",
+                    egui_phosphor::regular::SLIDERS
+                ))
+                .size(FONT_MD),
+            )
+            .id_salt("podcast_prefs_panel")
+            .open(Some(self.prefs_open));
+
+            let prefs_response = prefs_header.show(ui, |ui| {
+                egui::Grid::new("podcast_prefs_grid")
+                    .num_columns(2)
+                    .spacing([SPACE_4, SPACE_2])
+                    .show(ui, |ui| {
+                        ui.label(text_label("Speed Preset:", &t));
+                        ui.horizontal(|ui| {
+                            let has_preset = self.working_prefs.speed_preset.is_some();
+                            let mut speed_val = self.working_prefs.speed_preset.unwrap_or(1.0);
+                            if ui
+                                .add_enabled(
+                                    has_preset,
+                                    egui::Slider::new(&mut speed_val, 0.5..=3.0)
+                                        .step_by(0.25)
+                                        .fixed_decimals(2)
+                                        .text("x"),
+                                )
+                                .changed()
+                            {
+                                self.working_prefs.speed_preset = Some(speed_val);
+                            }
+                            ui.add_space(SPACE_2);
+                            if has_preset {
+                                if btn_ghost(ui, "Use Global", &t)
+                                    .on_hover_text("Inherit speed from global settings")
+                                    .clicked()
+                                {
+                                    self.working_prefs.speed_preset = None;
+                                }
+                            } else if btn_ghost(ui, "Override", &t)
+                                .on_hover_text("Set a custom speed for this podcast")
+                                .clicked()
+                            {
+                                self.working_prefs.speed_preset =
+                                    Some(state.settings.default_speed);
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.label(text_label("Auto-Download:", &t));
+                        ui.horizontal(|ui| {
+                            let use_global = self.working_prefs.auto_download.is_none();
+                            let enabled = self.working_prefs.auto_download.unwrap_or(false);
+                            if btn_segment(ui, "Use Global", use_global, &t).clicked() {
+                                self.working_prefs.auto_download = None;
+                            }
+                            ui.add_space(SPACE_1);
+                            if btn_segment(ui, "Off", !use_global && !enabled, &t).clicked() {
+                                self.working_prefs.auto_download = Some(false);
+                            }
+                            ui.add_space(SPACE_1);
+                            if btn_segment(ui, "On", !use_global && enabled, &t).clicked() {
+                                self.working_prefs.auto_download = Some(true);
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.label(text_label("Keep Episodes:", &t));
+                        ui.horizontal(|ui| {
+                            let has_keep = self.working_prefs.keep_episodes_count.is_some();
+                            let mut keep_val =
+                                self.working_prefs.keep_episodes_count.unwrap_or(0);
+                            if ui
+                                .add_enabled(
+                                    has_keep,
+                                    egui::Slider::new(&mut keep_val, 0..=50).custom_formatter(
+                                        |v, _| {
+                                            if v == 0.0 {
+                                                "All".to_string()
+                                            } else {
+                                                format!("{}", v as i32)
+                                            }
+                                        },
+                                    ),
+                                )
+                                .changed()
+                            {
+                                self.working_prefs.keep_episodes_count = Some(keep_val);
+                            }
+                            ui.add_space(SPACE_2);
+                            if has_keep {
+                                if btn_ghost(ui, "Use Global", &t).clicked() {
+                                    self.working_prefs.keep_episodes_count = None;
+                                }
+                            } else if btn_ghost(ui, "Override", &t).clicked() {
+                                self.working_prefs.keep_episodes_count = Some(0);
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.label(text_label("Skip Intro (sec):", &t));
+                        ui.add(
+                            egui::DragValue::new(&mut self.working_prefs.skip_intro_seconds)
+                                .range(0..=300)
+                                .speed(1.0),
+                        );
+                        ui.end_row();
+
+                        ui.label(text_label("Skip Outro (sec):", &t));
+                        ui.add(
+                            egui::DragValue::new(&mut self.working_prefs.skip_outro_seconds)
+                                .range(0..=300)
+                                .speed(1.0),
+                        );
+                        ui.end_row();
+                    });
+
+                ui.add_space(SPACE_2);
+                if btn_primary(ui, "Save Podcast Settings", &t).clicked() {
+                    let _ = cmd_tx.send(AppCommand::UpdatePodcastPreferences {
+                        podcast_id,
+                        prefs: self.working_prefs.clone(),
+                    });
+                    self.prefs_loaded_for = None;
+                }
+            });
+
+            if prefs_response.header_response.clicked() {
+                self.prefs_open = !self.prefs_open;
+            }
+
+            ui.add_space(SPACE_3);
+
+            // ── Episode filter bar ────────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.label("Search:");
+                ui.label(text_label("Search:", &t));
                 ui.text_edit_singleline(&mut self.search_query);
 
-                ui.add_space(20.0);
+                ui.add_space(SPACE_5);
 
-                ui.label("Sort:");
+                ui.label(text_label("Sort:", &t));
                 egui::ComboBox::from_id_salt("episode_sort_order")
                     .selected_text(match self.sort_order {
                         SortOrder::AToZ => "A to Z",
@@ -138,11 +342,10 @@ impl PodcastDetailPage {
                     });
             });
 
-            ui.add_space(10.0);
+            ui.add_space(SPACE_3);
 
-            // Episode list
+            // ── Episode list ──────────────────────────────────────────────────
             let episodes = self.filtered_episodes(&state.detail_episodes);
-
             let current_episode_id = state.now_playing.as_ref().map(|np| np.episode_id);
 
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -151,129 +354,203 @@ impl PodcastDetailPage {
                         let ep_id = episode.id;
                         let is_current = current_episode_id == Some(ep_id);
 
-                        ui.horizontal(|ui| {
-                            ui.set_width(ui.available_width());
+                        let row_frame = if is_current {
+                            egui::Frame::default()
+                                .stroke(egui::Stroke::new(1.5, t.in_progress))
+                                .inner_margin(egui::Margin {
+                                    left: 6,
+                                    right: 2,
+                                    top: 2,
+                                    bottom: 2,
+                                })
+                        } else {
+                            egui::Frame::default()
+                        };
 
-                            let text_color = if episode.is_played && !is_current {
-                                egui::Color32::from_rgb(120, 120, 125)
-                            } else {
-                                ui.visuals().text_color()
-                            };
+                        row_frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.set_width(ui.available_width());
 
-                            // Play/pause icon
-                            let (rect, response) = ui
-                                .allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
-
-                            let icon_text = if response.hovered() {
-                                if is_current {
-                                    egui_phosphor::regular::PAUSE
+                                let text_color = if episode.is_played && !is_current {
+                                    t.text_secondary
                                 } else {
-                                    egui_phosphor::regular::PLAY
-                                }
-                            } else if episode.is_played {
-                                egui_phosphor::regular::RECORD
-                            } else {
-                                egui_phosphor::regular::CIRCLE
-                            };
+                                    t.text_primary
+                                };
 
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                icon_text,
-                                egui::FontId::proportional(20.0),
-                                text_color,
-                            );
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(24.0, 24.0),
+                                    egui::Sense::click(),
+                                );
 
-                            if response.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-
-                            if response.clicked() {
-                                if is_current {
-                                    let _ = cmd_tx.send(AppCommand::PausePlayback);
-                                } else {
-                                    let _ = cmd_tx.send(AppCommand::PlayEpisode(ep_id));
-                                }
-                            }
-
-                            ui.add_space(10.0);
-
-                            // Title (truncated)
-                            let title = if episode.title.len() > 50 {
-                                let end = episode
-                                    .title
-                                    .char_indices()
-                                    .nth(47)
-                                    .map(|(i, _)| i)
-                                    .unwrap_or(episode.title.len());
-                                format!("{}...", &episode.title[..end])
-                            } else {
-                                episode.title.clone()
-                            };
-                            ui.label(egui::RichText::new(title).color(text_color));
-
-                            // Right-side actions
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let menu_btn = ui.button(
-                                        egui::RichText::new(egui_phosphor::regular::DOTS_THREE)
-                                            .size(16.0),
-                                    );
-
-                                    egui::Popup::menu(&menu_btn).show(|ui: &mut egui::Ui| {
-                                        ui.set_min_width(150.0);
-
-                                        if ui
-                                            .button(if episode.is_played {
-                                                "Mark Unplayed"
-                                            } else {
-                                                "Mark Played"
-                                            })
-                                            .clicked()
-                                        {
-                                            let _ = cmd_tx.send(AppCommand::TogglePlayed(ep_id));
-                                            ui.close();
+                                let icon_text = if response.hovered() {
+                                    if is_current {
+                                        if is_paused {
+                                            egui_phosphor::regular::PLAY
+                                        } else {
+                                            egui_phosphor::regular::PAUSE
                                         }
-
-                                        if ui.button("Add to Queue").clicked() {
-                                            let _ = cmd_tx.send(AppCommand::AddToQueue(ep_id));
-                                            ui.close();
-                                        }
-
-                                        if ui.button("Download").clicked() {
-                                            let _ = cmd_tx.send(AppCommand::DownloadEpisode(ep_id));
-                                            ui.close();
-                                        }
-                                    });
-
-                                    ui.add_space(10.0);
-                                    ui.label(
-                                        egui::RichText::new(episode.format_publish_date())
-                                            .color(text_color),
-                                    );
-
-                                    ui.add_space(6.0);
-
-                                    // Notes button — opens the panel anchored to this episode.
-                                    let notes_btn = ui
-                                        .button(
-                                            egui::RichText::new(
-                                                egui_phosphor::regular::NOTE_PENCIL,
-                                            )
-                                            .size(15.0)
-                                            .color(egui::Color32::from_rgb(130, 130, 140)),
-                                        )
-                                        .on_hover_text("Notes");
-                                    if notes_btn.clicked() {
-                                        state.notes_open_request = Some((
-                                            ep_id,
-                                            episode.podcast_id,
-                                            episode.title.clone(),
-                                        ));
+                                    } else {
+                                        egui_phosphor::regular::PLAY
                                     }
-                                },
-                            );
+                                } else if episode.is_played {
+                                    egui_phosphor::regular::RECORD
+                                } else {
+                                    egui_phosphor::regular::CIRCLE
+                                };
+
+                                ui.painter().text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    icon_text,
+                                    egui::FontId::proportional(20.0),
+                                    text_color,
+                                );
+
+                                if response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+
+                                if response.clicked() {
+                                    if is_current {
+                                        let _ = cmd_tx.send(AppCommand::TogglePlayback);
+                                    } else {
+                                        let _ = cmd_tx.send(AppCommand::PlayEpisode(ep_id));
+                                    }
+                                }
+
+                                ui.add_space(CONTROL_GAP);
+
+                                let title = if episode.title.len() > 50 {
+                                    let end = episode
+                                        .title
+                                        .char_indices()
+                                        .nth(47)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(episode.title.len());
+                                    format!("{}...", &episode.title[..end])
+                                } else {
+                                    episode.title.clone()
+                                };
+                                ui.label(egui::RichText::new(title).color(text_color));
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let menu_btn = ui.button(
+                                            egui::RichText::new(
+                                                egui_phosphor::regular::DOTS_THREE,
+                                            )
+                                            .size(16.0),
+                                        );
+
+                                        egui::Popup::menu(&menu_btn)
+                                            .show(|ui: &mut egui::Ui| {
+                                                ui.set_min_width(150.0);
+
+                                                if ui
+                                                    .button(if episode.is_played {
+                                                        "Mark Unplayed"
+                                                    } else {
+                                                        "Mark Played"
+                                                    })
+                                                    .clicked()
+                                                {
+                                                    let _ = cmd_tx.send(
+                                                        AppCommand::TogglePlayed(ep_id),
+                                                    );
+                                                    ui.close();
+                                                }
+
+                                                if ui.button("Add to Queue").clicked() {
+                                                    let _ = cmd_tx
+                                                        .send(AppCommand::AddToQueue(ep_id));
+                                                    ui.close();
+                                                }
+
+                                                match episode.download_status {
+                                                    DownloadStatus::NotDownloaded
+                                                    | DownloadStatus::Failed => {
+                                                        if ui.button("Download").clicked() {
+                                                            let _ = cmd_tx.send(
+                                                                AppCommand::DownloadEpisode(ep_id),
+                                                            );
+                                                            ui.close();
+                                                        }
+                                                    }
+                                                    DownloadStatus::Downloading => {
+                                                        ui.add_enabled(
+                                                            false,
+                                                            egui::Button::new("Downloading…"),
+                                                        );
+                                                    }
+                                                    DownloadStatus::Downloaded => {
+                                                        if ui.button("Delete Download").clicked()
+                                                        {
+                                                            let _ = cmd_tx.send(
+                                                                AppCommand::DeleteDownload(ep_id),
+                                                            );
+                                                            ui.close();
+                                                        }
+                                                    }
+                                                }
+                                            });
+
+                                        ui.add_space(CONTROL_GAP);
+
+                                        match episode.download_status {
+                                            DownloadStatus::Downloaded => {
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        egui_phosphor::regular::DOWNLOAD_SIMPLE,
+                                                    )
+                                                    .size(14.0)
+                                                    .color(t.success),
+                                                )
+                                                .on_hover_text("Downloaded");
+                                            }
+                                            DownloadStatus::Downloading => {
+                                                ui.spinner();
+                                            }
+                                            DownloadStatus::Failed => {
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        egui_phosphor::regular::WARNING,
+                                                    )
+                                                    .size(14.0)
+                                                    .color(t.error),
+                                                )
+                                                .on_hover_text("Download failed");
+                                            }
+                                            DownloadStatus::NotDownloaded => {}
+                                        }
+
+                                        ui.add_space(ICON_GAP);
+                                        ui.label(
+                                            egui::RichText::new(episode.format_publish_date())
+                                                .color(t.text_meta),
+                                        );
+
+                                        ui.add_space(ICON_GAP);
+
+                                        let notes_btn = ui
+                                            .button(
+                                                egui::RichText::new(
+                                                    egui_phosphor::regular::NOTE_PENCIL,
+                                                )
+                                                .size(15.0)
+                                                .color(t.text_meta),
+                                            )
+                                            .on_hover_text("Notes");
+                                        if notes_btn.clicked() {
+                                            state.notes_open_request = Some((
+                                                ep_id,
+                                                episode.podcast_id,
+                                                episode.title.clone(),
+                                            ));
+                                        }
+                                    },
+                                );
+                            });
                         });
 
                         ui.separator();

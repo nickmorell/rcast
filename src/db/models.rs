@@ -1,5 +1,34 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum DownloadStatus {
+    #[default]
+    NotDownloaded,
+    Downloading,
+    Downloaded,
+    Failed,
+}
+
+impl DownloadStatus {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "downloading" => Self::Downloading,
+            "downloaded" => Self::Downloaded,
+            "failed" => Self::Failed,
+            _ => Self::NotDownloaded,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotDownloaded => "not_downloaded",
+            Self::Downloading => "downloading",
+            Self::Downloaded => "downloaded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Podcast {
     pub id: i32,
@@ -11,6 +40,12 @@ pub struct Podcast {
     pub last_synced_at: i64, // 0 means never synced
     pub created_at: i64,
     pub updated_at: i64,
+    // Per-show preferences (None = inherit global)
+    pub speed_preset: Option<f32>,
+    pub auto_download: Option<bool>,
+    pub keep_episodes_count: Option<i32>,
+    pub skip_intro_seconds: i32,
+    pub skip_outro_seconds: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +62,22 @@ pub struct Episode {
     pub position_seconds: f64,
     pub created_at: i64,
     pub updated_at: i64,
+    // Download tracking
+    pub download_status: DownloadStatus,
+    pub downloaded_path: Option<String>,
+    pub speed_preset: Option<f32>,
+    // Chapter support (Podcasting 2.0 namespace)
+    pub chapters_url: Option<String>,
+    // Listening statistics
+    pub total_listen_seconds: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListeningStats {
+    pub total_listen_seconds: i64,
+    pub episodes_completed: i64,
+    pub total_podcasts: i64,
+    pub total_episodes: i64,
 }
 
 /** A user-created note, optionally tied to a timestamp.
@@ -55,9 +106,9 @@ impl Episode {
 
         if days == 0 {
             "Today".to_string()
-        } else if days >= 1 && days <= 6 {
+        } else if (1..=6).contains(&days) {
             format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
-        } else if days >= 7 && days <= 21 {
+        } else if (7..=21).contains(&days) {
             let weeks = days / 7;
             format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" })
         } else {

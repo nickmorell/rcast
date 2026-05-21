@@ -1,8 +1,12 @@
 use crate::errors::DatabaseError;
 use rusqlite::Transaction;
+pub mod add_download_tracking;
+pub mod add_episode_chapters_url;
+pub mod add_episode_listen_time;
 pub mod add_episode_position;
 pub mod add_episode_unique_index;
 pub mod add_podcast_last_synced_at;
+pub mod add_podcast_preferences;
 pub mod create_bookmarks_table;
 pub mod initial_migration_02082026;
 pub trait Migration {

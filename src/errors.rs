@@ -33,7 +33,7 @@ impl fmt::Display for DatabaseError {
             Self::MigrationError(issue) => {
                 write!(f, "Migration error: {}", issue)
             }
-            Self::LockPoisoned => write!(f, "Lock Poisoned {}", ""),
+            Self::LockPoisoned => write!(f, "Lock Poisoned"),
         }
     }
 }

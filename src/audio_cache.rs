@@ -34,10 +34,8 @@ impl AudioCache {
             return;
         }
 
-        if self.map.len() >= self.max_entries {
-            if let Some(lru_id) = self.order.pop_back() {
-                self.map.remove(&lru_id);
-            }
+        if self.map.len() >= self.max_entries && let Some(lru_id) = self.order.pop_back() {
+            self.map.remove(&lru_id);
         }
 
         self.map.insert(episode_id, bytes);

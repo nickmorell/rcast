@@ -2,16 +2,27 @@ use egui::Ui;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
+use crate::components::media_controls::MediaControlsState;
 use crate::components::podcast_card::PodcastCard;
 use crate::db::models::Podcast;
+use crate::design::components::*;
+use crate::design::spacing::*;
+use crate::design::tokens::ThemeTokens;
+use crate::design::typography::*;
+use crate::image_cache::ImageCache;
 use crate::state::AppState;
 use crate::types::{HomeDensity, Page, SortOrder};
 
 pub struct HomePage {
     search_query: String,
     sort_order: SortOrder,
-    pub show_queue: bool,
-    pub show_speed_menu: bool,
+    pub media_state: MediaControlsState,
+    cached_podcast_ids: Vec<i32>,
+    last_search_query: String,
+    last_sort_order: SortOrder,
+    last_podcast_count: usize,
+    pending_density: Option<crate::types::HomeDensity>,
+    frames_since_density_change: u32,
 }
 
 impl Default for HomePage {
@@ -19,8 +30,13 @@ impl Default for HomePage {
         Self {
             search_query: String::new(),
             sort_order: SortOrder::AToZ,
-            show_queue: false,
-            show_speed_menu: false,
+            media_state: MediaControlsState::default(),
+            cached_podcast_ids: Vec::new(),
+            last_search_query: String::new(),
+            last_sort_order: SortOrder::AToZ,
+            last_podcast_count: 0,
+            pending_density: None,
+            frames_since_density_change: 0,
         }
     }
 }
@@ -32,6 +48,8 @@ impl HomePage {
         state: &mut AppState,
         cmd_tx: &UnboundedSender<AppCommand>,
     ) {
+        let t = state.theme.clone();
+
         if state.podcasts.is_empty() {
             let available = ui.available_size();
             ui.allocate_ui_with_layout(
@@ -42,29 +60,19 @@ impl HomePage {
                     ui.label(
                         egui::RichText::new(egui_phosphor::regular::HEADPHONES)
                             .size(72.0)
-                            .color(egui::Color32::from_rgb(80, 80, 85)),
+                            .color(t.text_disabled),
                     );
-                    ui.add_space(16.0);
-                    ui.label(egui::RichText::new("No podcasts yet").size(22.0).strong());
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("Add a podcast to get started.")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(150, 150, 155)),
-                    );
-                    ui.add_space(20.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(format!(
-                                    "{}  Add Podcast",
-                                    egui_phosphor::regular::PLUS_CIRCLE
-                                ))
-                                .size(15.0),
-                            )
-                            .min_size(egui::vec2(140.0, 36.0)),
-                        )
-                        .clicked()
+                    ui.add_space(SPACE_4);
+                    ui.label(text_page_title("No podcasts yet", &t));
+                    ui.add_space(SPACE_2);
+                    ui.label(text_meta("Add a podcast to get started.", &t));
+                    ui.add_space(SPACE_5);
+                    if btn_primary(
+                        ui,
+                        &format!("{}  Add Podcast", egui_phosphor::regular::PLUS_CIRCLE),
+                        &t,
+                    )
+                    .clicked()
                     {
                         state.open_add_podcast_requested = true;
                     }
@@ -74,16 +82,16 @@ impl HomePage {
         }
 
         ui.vertical(|ui| {
-            ui.add_space(10.0);
+            ui.add_space(SPACE_3);
 
-            // Filter / sort / density bar
+            // ── Filter / sort / density bar ───────────────────────────────────
             ui.horizontal(|ui| {
-                ui.label("Search:");
+                ui.label(text_label("Search:", &t));
                 ui.text_edit_singleline(&mut self.search_query);
 
-                ui.add_space(20.0);
+                ui.add_space(SPACE_5);
 
-                ui.label("Sort:");
+                ui.label(text_label("Sort:", &t));
                 egui::ComboBox::from_id_salt("sort_order")
                     .selected_text(match self.sort_order {
                         SortOrder::AToZ => "A to Z",
@@ -106,20 +114,11 @@ impl HomePage {
                         );
                     });
 
-                // Density toggle
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let is_list = state.settings.home_density == HomeDensity::List;
 
-                    let list_color = if is_list {
-                        egui::Color32::from_rgb(140, 180, 255)
-                    } else {
-                        egui::Color32::from_rgb(120, 120, 130)
-                    };
-                    let grid_color = if !is_list {
-                        egui::Color32::from_rgb(140, 180, 255)
-                    } else {
-                        egui::Color32::from_rgb(120, 120, 130)
-                    };
+                    let list_color = if is_list { t.accent } else { t.text_secondary };
+                    let grid_color = if !is_list { t.accent } else { t.text_secondary };
 
                     if ui
                         .button(
@@ -132,7 +131,8 @@ impl HomePage {
                         && !is_list
                     {
                         state.settings.home_density = HomeDensity::List;
-                        let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                        self.pending_density = Some(HomeDensity::List);
+                        self.frames_since_density_change = 0;
                     }
 
                     if ui
@@ -146,45 +146,107 @@ impl HomePage {
                         && is_list
                     {
                         state.settings.home_density = HomeDensity::Grid;
-                        let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                        self.pending_density = Some(HomeDensity::Grid);
+                        self.frames_since_density_change = 0;
                     }
                 });
             });
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(SPACE_3);
+            divider(ui, &t);
 
-            // Filter + sort
-            let query = self.search_query.to_lowercase();
-            let mut filtered: Vec<&Podcast> = state
-                .podcasts
-                .iter()
-                .filter(|p| {
-                    query.is_empty()
-                        || p.title.to_lowercase().contains(&query)
-                        || p.description.to_lowercase().contains(&query)
-                })
-                .collect();
+            // ── Filter + sort + cache ──────────────────────────────────────────
+            let query_lower = self.search_query.to_lowercase();
+            let podcasts_changed = state.podcasts.len() != self.last_podcast_count;
+            let should_recalculate = podcasts_changed
+                || self.last_search_query != query_lower
+                || self.last_sort_order != self.sort_order;
 
-            match self.sort_order {
-                SortOrder::AToZ => filtered.sort_by(|a, b| a.title.cmp(&b.title)),
-                SortOrder::ZToA => filtered.sort_by(|a, b| b.title.cmp(&a.title)),
-                SortOrder::PublishDateAsc => filtered.sort_by_key(|p| p.updated_at),
-                SortOrder::PublishDateDesc => {
-                    filtered.sort_by_key(|p| std::cmp::Reverse(p.updated_at))
+            if should_recalculate {
+                let mut filtered: Vec<&Podcast> = state
+                    .podcasts
+                    .iter()
+                    .filter(|p| {
+                        query_lower.is_empty()
+                            || p.title.to_lowercase().contains(&query_lower)
+                            || p.description.to_lowercase().contains(&query_lower)
+                    })
+                    .collect();
+
+                match self.sort_order {
+                    SortOrder::AToZ => filtered.sort_by(|a, b| a.title.cmp(&b.title)),
+                    SortOrder::ZToA => filtered.sort_by(|a, b| b.title.cmp(&a.title)),
+                    SortOrder::PublishDateAsc => filtered.sort_by_key(|p| p.updated_at),
+                    SortOrder::PublishDateDesc => {
+                        filtered.sort_by_key(|p| std::cmp::Reverse(p.updated_at))
+                    }
                 }
+
+                self.cached_podcast_ids = filtered.iter().map(|p| p.id).collect();
+                self.last_search_query = query_lower.clone();
+                self.last_sort_order = self.sort_order;
+                self.last_podcast_count = state.podcasts.len();
             }
 
-            let podcast_ids: Vec<i32> = filtered.iter().map(|p| p.id).collect();
+            let podcast_id_map: std::collections::HashMap<i32, &Podcast> = state
+                .podcasts
+                .iter()
+                .map(|p| (p.id, p))
+                .collect();
+
+            let podcast_ids = &self.cached_podcast_ids;
             let density = state.settings.home_density;
 
-            egui::ScrollArea::vertical().show(ui, |ui| match density {
-                HomeDensity::Grid => {
-                    ui.add_space(5.0);
-                    ui.horizontal_wrapped(|ui| {
-                        for id in &podcast_ids {
-                            let Some(podcast) = state.podcasts.iter().find(|p| p.id == *id) else {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| match density {
+                    HomeDensity::Grid => {
+                        let grid_width = ui.available_width();
+                        const CARD_SIZE: f32 = 200.0;
+                        const CARD_SPACING: f32 = 20.0;
+
+                        let cols = ((grid_width + CARD_SPACING) / (CARD_SIZE + CARD_SPACING))
+                            .floor()
+                            .max(1.0) as usize;
+
+                        ui.add_space(SPACE_2);
+                        for row in podcast_ids.chunks(cols) {
+                            ui.horizontal(|ui| {
+                                ui.add_space(CARD_SPACING);
+                                for id in row {
+                                    let Some(podcast) = podcast_id_map.get(id) else {
+                                        continue;
+                                    };
+                                    let is_playing = state
+                                        .now_playing
+                                        .as_ref()
+                                        .map(|np| np.podcast_id == podcast.id)
+                                        .unwrap_or(false);
+                                    let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
+
+                                    if PodcastCard::new(
+                                        podcast,
+                                        &state.image_cache,
+                                        is_playing,
+                                        is_syncing,
+                                    )
+                                    .show(ui, &t)
+                                    .clicked()
+                                    {
+                                        let _ = cmd_tx.send(AppCommand::NavigateTo(
+                                            Page::PodcastDetail(podcast.id),
+                                        ));
+                                    }
+                                    ui.add_space(CARD_SPACING);
+                                }
+                            });
+                            ui.add_space(CARD_SPACING);
+                        }
+                    }
+                    HomeDensity::List => {
+                        ui.set_width(ui.available_width());
+                        for id in podcast_ids {
+                            let Some(podcast) = podcast_id_map.get(id) else {
                                 continue;
                             };
                             let is_playing = state
@@ -193,57 +255,44 @@ impl HomePage {
                                 .map(|np| np.podcast_id == podcast.id)
                                 .unwrap_or(false);
                             let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
-                            ui.add_space(10.0);
-                            if PodcastCard::new(podcast, &state.image_cache, is_playing, is_syncing)
-                                .show(ui)
-                                .clicked()
-                            {
-                                let _ = cmd_tx
-                                    .send(AppCommand::NavigateTo(Page::PodcastDetail(podcast.id)));
+
+                            if render_podcast_row(
+                                ui,
+                                podcast,
+                                is_playing,
+                                is_syncing,
+                                &state.image_cache,
+                                &t,
+                            ) {
+                                let _ = cmd_tx.send(AppCommand::NavigateTo(
+                                    Page::PodcastDetail(podcast.id),
+                                ));
                             }
-                        }
-                    });
-                }
-                HomeDensity::List => {
-                    ui.set_width(ui.available_width());
-                    for id in &podcast_ids {
-                        let Some(podcast) = state.podcasts.iter().find(|p| p.id == *id) else {
-                            continue;
-                        };
-                        let is_playing = state
-                            .now_playing
-                            .as_ref()
-                            .map(|np| np.podcast_id == podcast.id)
-                            .unwrap_or(false);
-                        let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
 
-                        if render_podcast_row(
-                            ui,
-                            podcast,
-                            is_playing,
-                            is_syncing,
-                            &state.image_cache,
-                        ) {
-                            let _ = cmd_tx
-                                .send(AppCommand::NavigateTo(Page::PodcastDetail(podcast.id)));
+                            divider(ui, &t);
                         }
-
-                        ui.separator();
                     }
+                });
+
+            // ── Debounced settings persistence ────────────────────────────────
+            if self.pending_density.is_some() {
+                self.frames_since_density_change += 1;
+                if self.frames_since_density_change >= 10 {
+                    let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                    self.pending_density = None;
                 }
-            });
+            }
         });
     }
 }
-
-// List-view row
 
 fn render_podcast_row(
     ui: &mut egui::Ui,
     podcast: &Podcast,
     is_playing: bool,
     is_syncing: bool,
-    image_cache: &crate::image_cache::ImageCache,
+    image_cache: &ImageCache,
+    t: &ThemeTokens,
 ) -> bool {
     let row_height = 56.0;
     let thumb_size = 40.0;
@@ -254,16 +303,14 @@ fn render_podcast_row(
     );
 
     if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 0.0, egui::Color32::from_rgb(38, 38, 44));
+        ui.painter().rect_filled(rect, 0.0, t.hover_bg);
     }
 
-    // Blue left border when playing
     if is_playing {
         ui.painter().rect_filled(
             egui::Rect::from_min_size(rect.min, egui::vec2(3.0, row_height)),
             0.0,
-            egui::Color32::from_rgb(70, 130, 220),
+            t.in_progress,
         );
     }
 
@@ -276,7 +323,6 @@ fn render_podcast_row(
         egui::vec2(thumb_size, thumb_size),
     );
 
-    // Thumbnail
     let texture = image_cache
         .get_or_load(&podcast.image_url, ui.ctx())
         .unwrap_or_else(|| image_cache.get_default_texture(ui.ctx()));
@@ -288,7 +334,6 @@ fn render_podcast_row(
             .corner_radius(4.0),
     );
 
-    // Text column
     let text_x = thumb_rect.right() + 12.0;
     let text_width = inner_rect.right() - text_x - if is_syncing { 28.0 } else { 4.0 };
     let text_rect = egui::Rect::from_min_size(
@@ -298,8 +343,8 @@ fn render_podcast_row(
 
     ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
         ui.vertical(|ui| {
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new(&podcast.title).strong().size(14.0));
+            ui.add_space(SPACE_1);
+            ui.label(text_podcast_card_name(&podcast.title, t));
 
             let sync_text = if is_syncing {
                 "Syncing...".to_string()
@@ -309,20 +354,18 @@ fn render_podcast_row(
                 format_last_synced(podcast.last_synced_at)
             };
 
-            ui.label(
-                egui::RichText::new(format!(
+            ui.label(text_meta(
+                format!(
                     "{} ep{}  ·  {}",
                     podcast.episode_count,
                     if podcast.episode_count == 1 { "" } else { "s" },
                     sync_text,
-                ))
-                .size(11.0)
-                .color(egui::Color32::from_rgb(130, 130, 140)),
-            );
+                ),
+                t,
+            ));
         });
     });
 
-    // Spinner at right edge when syncing
     if is_syncing {
         let spinner_rect = egui::Rect::from_center_size(
             egui::pos2(rect.right() - 20.0, rect.center().y),
