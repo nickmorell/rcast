@@ -2,6 +2,8 @@ use std::time::{Duration, Instant};
 
 use egui::Context;
 
+use crate::design::tokens::ThemeTokens;
+
 #[derive(Debug, Clone)]
 pub enum ToastKind {
     Success,
@@ -62,7 +64,7 @@ impl ToastQueue {
 }
 
 // Renders active toasts in the bottom-right corner and removes expired ones.
-pub fn render(ctx: &Context, queue: &mut ToastQueue) {
+pub fn render(ctx: &Context, queue: &mut ToastQueue, t: &ThemeTokens) {
     queue.toasts.retain(|t| !t.is_expired());
 
     if queue.toasts.is_empty() {
@@ -77,9 +79,9 @@ pub fn render(ctx: &Context, queue: &mut ToastQueue) {
 
     for toast in queue.toasts.iter().rev() {
         let bg_color = match toast.kind {
-            ToastKind::Success => egui::Color32::from_rgb(34, 139, 34),
-            ToastKind::Error => egui::Color32::from_rgb(180, 40, 40),
-            ToastKind::Info => egui::Color32::from_rgb(50, 100, 180),
+            ToastKind::Success => t.success,
+            ToastKind::Error => t.error,
+            ToastKind::Info => t.accent,
         };
 
         let painter = ctx.layer_painter(egui::LayerId::new(

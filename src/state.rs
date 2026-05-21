@@ -2,6 +2,7 @@ use crate::chapters::Chapter;
 use crate::components::toast::ToastQueue;
 use crate::db::models::Bookmark;
 use crate::db::models::{Episode, Podcast};
+use crate::design::ThemeTokens;
 use crate::image_cache::ImageCache;
 use crate::types::{QueueDisplayItem, Settings};
 use std::collections::HashSet;
@@ -12,6 +13,8 @@ pub struct NowPlaying {
 }
 
 pub struct AppState {
+    pub theme: ThemeTokens,
+
     // Home page
     pub podcasts: Vec<Podcast>,
 
@@ -57,6 +60,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            theme: ThemeTokens::dark(),
             podcasts: Vec::new(),
             detail_podcast: None,
             detail_episodes: Vec::new(),

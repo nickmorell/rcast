@@ -60,6 +60,15 @@ pub struct PodcastPreferences {
     pub skip_outro_seconds: i32,
 }
 
+// Theme
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+}
+
 // Settings
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +91,8 @@ pub struct Settings {
     // Notifications
     pub notify_new_episodes: bool,
     pub notify_download_complete: bool,
+    // Appearance
+    pub theme: ThemeMode,
 }
 
 impl Default for Settings {
@@ -105,6 +116,7 @@ impl Default for Settings {
             hotkeys: HotkeySettings::default(),
             notify_new_episodes: true,
             notify_download_complete: true,
+            theme: ThemeMode::default(),
         }
     }
 }

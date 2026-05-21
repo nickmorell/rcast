@@ -9,7 +9,7 @@ use rusqlite::{Connection, params};
 
 use crate::errors::DatabaseError;
 use crate::migrations::run_migrations;
-use crate::types::{HomeDensity, PodcastPreferences, QueueDisplayItem, QueueItem, Settings, TrimSilenceMode};
+use crate::types::{HomeDensity, PodcastPreferences, QueueDisplayItem, QueueItem, Settings, ThemeMode, TrimSilenceMode};
 use models::{Bookmark, DownloadStatus, Episode, Podcast};
 
 #[derive(Clone)]
@@ -748,6 +748,12 @@ impl Database {
                     "notify_download_complete" => {
                         settings.notify_download_complete = row.1 == "true"
                     }
+                    "theme" => {
+                        settings.theme = match row.1.as_str() {
+                            "light" => ThemeMode::Light,
+                            _ => ThemeMode::Dark,
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -793,6 +799,13 @@ impl Database {
                 ("hotkey_skip_backward", settings.hotkeys.skip_backward.clone()),
                 ("notify_new_episodes", settings.notify_new_episodes.to_string()),
                 ("notify_download_complete", settings.notify_download_complete.to_string()),
+                (
+                    "theme",
+                    match settings.theme {
+                        ThemeMode::Dark => "dark".to_string(),
+                        ThemeMode::Light => "light".to_string(),
+                    },
+                ),
             ];
 
             for (key, value) in rows {

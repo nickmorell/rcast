@@ -5,6 +5,7 @@ mod application;
 mod audio_cache;
 mod audio_player;
 mod chapters;
+mod design;
 mod commands;
 mod components;
 mod db;
@@ -37,11 +38,48 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tray::AppTray;
 
+fn load_fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+
+    fonts.font_data.insert(
+        "Inter-Regular".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Regular.ttf")).into(),
+    );
+    fonts.font_data.insert(
+        "Inter-Medium".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Medium.ttf")).into(),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "Inter-Regular".to_owned());
+    fonts.families.insert(
+        egui::FontFamily::Name("Medium".into()),
+        vec!["Inter-Medium".to_owned()],
+    );
+    fonts
+}
+
 fn main() -> eframe::Result {
     let tokio_runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
 
+    // Load and prepare application icon
+    let icon_data = include_bytes!("../assets/icons/icon-256x256.png");
+    let icon_image = image::load_from_memory(icon_data)
+        .expect("Failed to load icon")
+        .to_rgba8();
+    let icon = egui::IconData {
+        rgba: icon_image.to_vec(),
+        width: 256,
+        height: 256,
+    };
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1200.0, 800.0])
+            .with_icon(icon),
         ..Default::default()
     };
 
@@ -63,10 +101,10 @@ fn main() -> eframe::Result {
         "RCast - Podcast Player",
         options,
         Box::new(move |cc| {
-            // Register Phosphor icons.
-            let mut fonts = egui::FontDefinitions::default();
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-            cc.egui_ctx.set_fonts(fonts);
+            cc.egui_ctx.set_fonts(load_fonts());
+
+            cc.egui_ctx
+                .set_visuals(design::visuals::build_visuals(&design::ThemeTokens::dark()));
 
             // System tray — failure is non-fatal (may not be supported on all platforms/configs).
             let tray = AppTray::new().ok();

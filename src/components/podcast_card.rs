@@ -1,6 +1,9 @@
 use egui::{Color32, Response, Ui};
 
 use crate::db::models::Podcast;
+use crate::design::spacing::*;
+use crate::design::tokens::ThemeTokens;
+use crate::design::typography::*;
 use crate::image_cache::ImageCache;
 
 pub struct PodcastCard<'a> {
@@ -17,42 +20,33 @@ impl<'a> PodcastCard<'a> {
         is_playing: bool,
         is_syncing: bool,
     ) -> Self {
-        Self {
-            podcast,
-            image_cache,
-            is_playing,
-            is_syncing,
-        }
+        Self { podcast, image_cache, is_playing, is_syncing }
     }
 
-    pub fn show(self, ui: &mut Ui) -> Response {
+    pub fn show(self, ui: &mut Ui, t: &ThemeTokens) -> Response {
         const CARD_SIZE: f32 = 200.0;
         const TOTAL_HEIGHT: f32 = 270.0;
-        // Maximum extra pixels added at full hover (1% of card width each side ≈ 2px)
         const MAX_EXPAND: f32 = 4.0;
-        // Lerp speed per frame - reaches 1.0 in ~8 frames (≈130ms at 60fps)
         const LERP_SPEED: f32 = 0.12;
 
         ui.vertical(|ui| {
             ui.set_width(CARD_SIZE);
             ui.set_height(TOTAL_HEIGHT);
 
-            // Allocate the layout rect at normal size so nothing shifts.
             let (layout_rect, response) =
                 ui.allocate_exact_size(egui::vec2(CARD_SIZE, TOTAL_HEIGHT), egui::Sense::click());
 
-            // Per-card hover animation state
             let anim_id = egui::Id::new("podcast_card_hover").with(self.podcast.id);
             let hovered = response.hovered();
 
             let hover_t = ui.ctx().data_mut(|d| {
-                let t: &mut f32 = d.get_temp_mut_or_default(anim_id);
+                let val: &mut f32 = d.get_temp_mut_or_default(anim_id);
                 if hovered {
-                    *t = (*t + LERP_SPEED).min(1.0);
+                    *val = (*val + LERP_SPEED).min(1.0);
                 } else {
-                    *t = (*t - LERP_SPEED).max(0.0);
+                    *val = (*val - LERP_SPEED).max(0.0);
                 }
-                *t
+                *val
             });
 
             if hover_t > 0.0 && hover_t < 1.0 {
@@ -61,50 +55,47 @@ impl<'a> PodcastCard<'a> {
 
             let ease = 1.0 - (1.0 - hover_t).powi(3);
             let expand = ease * MAX_EXPAND;
-
             let paint_rect = layout_rect.expand(expand);
 
-            // Playing state glow
+            // Playing glow
             if self.is_playing {
-                // Soft outer glow ring
                 ui.painter().rect(
                     paint_rect.expand(6.0),
-                    12.0,
+                    RADIUS_LG,
                     Color32::TRANSPARENT,
-                    egui::Stroke::new(4.0, Color32::from_rgba_premultiplied(70, 130, 220, 60)),
+                    egui::Stroke::new(
+                        4.0,
+                        Color32::from_rgba_premultiplied(
+                            t.in_progress.r(),
+                            t.in_progress.g(),
+                            t.in_progress.b(),
+                            60,
+                        ),
+                    ),
                     egui::epaint::StrokeKind::Outside,
                 );
-                // Crisp inner border
                 ui.painter().rect(
                     paint_rect,
-                    10.0,
+                    RADIUS_MD,
                     Color32::TRANSPARENT,
-                    egui::Stroke::new(2.0, Color32::from_rgb(100, 160, 255)),
+                    egui::Stroke::new(2.0, t.in_progress),
                     egui::epaint::StrokeKind::Outside,
                 );
             }
 
-            // Card background
-            let bg_rest = Color32::from_rgb(28, 28, 30);
-            let bg_hover = Color32::from_rgb(52, 52, 56);
-            let bg = lerp_color(bg_rest, bg_hover, ease);
+            // Card background with hover animation
+            let bg = lerp_color(t.card_bg, t.hover_bg, ease);
+            let border = lerp_color(t.border, t.text_meta, ease);
 
-            ui.painter().rect_filled(paint_rect, 10.0, bg);
+            ui.painter().rect_filled(paint_rect, RADIUS_MD, bg);
             ui.painter().rect_stroke(
                 paint_rect,
-                10.0,
-                egui::Stroke::new(
-                    1.0,
-                    lerp_color(
-                        Color32::from_rgb(48, 48, 52),
-                        Color32::from_rgb(72, 72, 80),
-                        ease,
-                    ),
-                ),
+                RADIUS_MD,
+                egui::Stroke::new(1.0, border),
                 egui::epaint::StrokeKind::Outside,
             );
 
-            // Podcast Image
+            // Podcast image
             let image_rect = egui::Rect::from_min_size(
                 paint_rect.min + egui::vec2(8.0, 8.0),
                 egui::vec2(
@@ -122,12 +113,11 @@ impl<'a> PodcastCard<'a> {
                 image_rect,
                 egui::Image::new(&texture)
                     .fit_to_exact_size(image_rect.size())
-                    .corner_radius(6.0),
+                    .corner_radius(RADIUS_SM),
             );
 
             // Now playing badge
             if self.is_playing {
-                // Small pill at the bottom-left of the image
                 let badge_w = 82.0;
                 let badge_h = 20.0;
                 let badge_rect = egui::Rect::from_min_size(
@@ -138,14 +128,14 @@ impl<'a> PodcastCard<'a> {
                 ui.painter().rect_filled(
                     badge_rect,
                     badge_h / 2.0,
-                    Color32::from_rgba_premultiplied(20, 50, 110, 230),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 200),
                 );
                 ui.painter().text(
                     badge_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     format!("{}  NOW PLAYING", egui_phosphor::regular::SPEAKER_HIGH),
                     egui::FontId::proportional(10.0),
-                    Color32::from_rgb(140, 180, 255),
+                    t.accent,
                 );
             }
 
@@ -157,7 +147,7 @@ impl<'a> PodcastCard<'a> {
                 );
                 ui.painter().rect_filled(
                     spinner_rect.expand(4.0),
-                    6.0,
+                    RADIUS_SM,
                     Color32::from_rgba_premultiplied(0, 0, 0, 180),
                 );
                 ui.put(spinner_rect, egui::Spinner::new().size(16.0));
@@ -172,10 +162,8 @@ impl<'a> PodcastCard<'a> {
 
             ui.scope_builder(egui::UiBuilder::new().max_rect(info_rect), |ui| {
                 ui.vertical(|ui| {
-                    ui.add_space(4.0);
-
-                    let title = truncate(&self.podcast.title, 30);
-                    ui.label(egui::RichText::new(title).strong());
+                    ui.add_space(SPACE_1);
+                    ui.label(text_podcast_card_name(truncate(&self.podcast.title, 30), t));
 
                     let sync_text = if self.is_syncing {
                         "Syncing...".to_string()
@@ -185,20 +173,15 @@ impl<'a> PodcastCard<'a> {
                         format_last_synced(self.podcast.last_synced_at)
                     };
 
-                    ui.label(
-                        egui::RichText::new(format!(
+                    ui.label(text_meta(
+                        format!(
                             "{} ep{}  ·  {}",
                             self.podcast.episode_count,
-                            if self.podcast.episode_count == 1 {
-                                ""
-                            } else {
-                                "s"
-                            },
-                            sync_text
-                        ))
-                        .small()
-                        .color(Color32::from_rgb(150, 150, 150)),
-                    );
+                            if self.podcast.episode_count == 1 { "" } else { "s" },
+                            sync_text,
+                        ),
+                        t,
+                    ));
                 });
             });
 
@@ -212,9 +195,6 @@ impl<'a> PodcastCard<'a> {
     }
 }
 
-// Helpers
-
-// Linear interpolation between two `Color32` values.
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     Color32::from_rgba_premultiplied(

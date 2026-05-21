@@ -2,10 +2,10 @@ use crate::{
     audio_player::AudioPlayer,
     chapters::{current_chapter, Chapter},
     db::models::Episode,
+    design::{spacing::*, tokens::ThemeTokens, typography::*},
     image_cache::ImageCache,
     types::QueueDisplayItem,
 };
-use egui::Color32;
 use egui_alignments::center_horizontal;
 use std::time::Duration;
 
@@ -50,6 +50,7 @@ impl MediaControls {
         audio_player: &AudioPlayer,
         ctx: &NowPlayingContext<'_>,
         state: &mut MediaControlsState,
+        t: &ThemeTokens,
     ) -> MediaControlsAction {
         let current_episode = ctx.episode;
         let current_podcast_title = ctx.podcast_title;
@@ -75,7 +76,7 @@ impl MediaControls {
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.set_width(left_width);
-                    ui.add_space(10.0);
+                    ui.add_space(CONTROL_GAP);
 
                     if let Some(podcast_title) = current_podcast_title {
                         if let Some(image_url) = current_podcast_image {
@@ -83,14 +84,14 @@ impl MediaControls {
                                 .get_or_load(image_url, ui.ctx())
                                 .unwrap_or_else(|| image_cache.get_default_texture(ui.ctx()));
                             ui.add(egui::Image::new(&texture).max_size(egui::vec2(60.0, 60.0)));
-                            ui.add_space(10.0);
+                            ui.add_space(CONTROL_GAP);
                         }
 
                         ui.vertical(|ui| {
                             ui.label(
                                 egui::RichText::new(podcast_title)
-                                    .size(12.0)
-                                    .color(Color32::from_rgb(200, 200, 200)),
+                                    .size(FONT_SM)
+                                    .color(t.text_secondary),
                             );
 
                             if let Some(episode) = current_episode {
@@ -105,7 +106,12 @@ impl MediaControls {
                                 } else {
                                     episode.title.clone()
                                 };
-                                ui.label(egui::RichText::new(title).size(14.0).strong());
+                                ui.label(
+                                    egui::RichText::new(title)
+                                        .size(FONT_MD)
+                                        .color(t.text_primary)
+                                        .strong(),
+                                );
                             }
 
                             if !chapters.is_empty() {
@@ -124,8 +130,8 @@ impl MediaControls {
                                     };
                                     ui.label(
                                         egui::RichText::new(format!("◆ {}", ch_name))
-                                            .size(11.0)
-                                            .color(Color32::from_rgb(140, 180, 255)),
+                                            .size(FONT_XS)
+                                            .color(t.accent),
                                     );
                                 }
                             }
@@ -158,7 +164,7 @@ impl MediaControls {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             }
 
-                            ui.add_space(15.0);
+                            ui.add_space(SPACE_4);
 
                             let play_pause_icon = match audio_player.get_state() {
                                 crate::audio_player::PlaybackState::Playing => {
@@ -197,13 +203,13 @@ impl MediaControls {
                             }
                         });
 
-                        ui.add_space(15.0);
+                        ui.add_space(SPACE_4);
                         ui.horizontal(|ui| {
                             let position = audio_player.get_position();
                             let duration = audio_player.get_duration();
 
                             ui.label(format_duration(position));
-                            ui.add_space(10.0);
+                            ui.add_space(CONTROL_GAP);
 
                             let mut pos_secs = position.as_secs_f32();
                             let dur_secs = duration.as_secs_f32();
@@ -226,14 +232,14 @@ impl MediaControls {
                                 }
                             });
 
-                            ui.add_space(10.0);
+                            ui.add_space(CONTROL_GAP);
                             ui.label(format_duration(duration));
                         });
                     });
                 },
             );
 
-            ui.add_space(15.0);
+            ui.add_space(SPACE_4);
 
             // RIGHT: notes, speed, queue, volume
             ui.allocate_ui_with_layout(
@@ -241,7 +247,7 @@ impl MediaControls {
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
                     ui.set_width(right_width);
-                    ui.add_space(10.0);
+                    ui.add_space(CONTROL_GAP);
 
                     let speed = audio_player.get_speed();
                     let speed_btn = ui.button(format!("{}x", speed));
@@ -298,7 +304,7 @@ impl MediaControls {
                         }
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
 
                     let has_chapters = !chapters.is_empty();
                     let chapters_icon = egui::RichText::new(egui_phosphor::regular::LIST_BULLETS)
@@ -338,15 +344,15 @@ impl MediaControls {
                                                 let row = ui.horizontal(|ui| {
                                                     ui.label(
                                                         egui::RichText::new(&time_str)
-                                                            .size(11.0)
-                                                            .color(Color32::from_rgb(160, 160, 160)),
+                                                            .size(FONT_XS)
+                                                            .color(t.text_meta),
                                                     );
-                                                    ui.add_space(6.0);
+                                                    ui.add_space(ICON_GAP);
                                                     let label = egui::RichText::new(&ch.title)
-                                                        .size(13.0)
+                                                        .size(FONT_MD)
                                                         .strong();
                                                     let label = if is_current {
-                                                        label.color(Color32::from_rgb(140, 180, 255))
+                                                        label.color(t.accent)
                                                     } else {
                                                         label
                                                     };
@@ -358,7 +364,7 @@ impl MediaControls {
                                                                 ui.label(
                                                                     egui::RichText::new("✓")
                                                                         .size(12.0)
-                                                                        .color(Color32::from_rgb(140, 180, 255)),
+                                                                        .color(t.accent),
                                                                 );
                                                             },
                                                         );
@@ -384,7 +390,7 @@ impl MediaControls {
                         }
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
 
                     let queue_btn = ui.button(
                         egui::RichText::new(egui_phosphor::regular::QUEUE).size(20.0),
@@ -393,7 +399,7 @@ impl MediaControls {
                         state.show_queue = !state.show_queue;
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
 
                     // Sleep timer button
                     let timer_label = if let Some(ends_at) = sleep_timer_ends_at {
@@ -407,11 +413,11 @@ impl MediaControls {
                         egui_phosphor::regular::MOON.to_string()
                     };
                     let timer_icon = egui::RichText::new(&timer_label)
-                        .size(if sleep_timer_ends_at.is_some() { 11.0 } else { 20.0 })
+                        .size(if sleep_timer_ends_at.is_some() { FONT_XS } else { 20.0 })
                         .color(if sleep_timer_ends_at.is_some() {
-                            egui::Color32::from_rgb(140, 180, 255)
+                            t.accent
                         } else {
-                            ui.visuals().text_color()
+                            t.text_primary
                         });
                     let timer_btn = ui
                         .button(timer_icon)
@@ -477,15 +483,11 @@ impl MediaControls {
                         }
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
 
                     let notes_icon = egui::RichText::new(egui_phosphor::regular::NOTE_PENCIL)
                         .size(20.0)
-                        .color(if notes_open {
-                            egui::Color32::from_rgb(140, 180, 255)
-                        } else {
-                            ui.visuals().text_color()
-                        });
+                        .color(if notes_open { t.accent } else { t.text_primary });
                     let notes_btn = ui.button(notes_icon)
                         .on_hover_text(if notes_open { "Close notes" } else { "Open notes" });
                     if notes_btn.clicked() {
@@ -512,10 +514,8 @@ impl MediaControls {
                                                                 egui::RichText::new(
                                                                     &item.podcast_title,
                                                                 )
-                                                                    .small()
-                                                                    .color(Color32::from_rgb(
-                                                                        180, 180, 180,
-                                                                    )),
+                                                                .small()
+                                                                .color(t.text_meta),
                                                             );
 
                                                             let title = if item.episode_title.len()
@@ -578,7 +578,7 @@ impl MediaControls {
                         }
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
 
                     let volume_slider = egui::Slider::new(&mut state.volume, 0.0..=100.0)
                         .show_value(false)
@@ -587,7 +587,7 @@ impl MediaControls {
                         action = MediaControlsAction::VolumeChanged(state.volume);
                     }
 
-                    ui.add_space(5.0);
+                    ui.add_space(SPACE_1);
                     ui.label(
                         egui::RichText::new(egui_phosphor::regular::SPEAKER_HIGH).size(20.0),
                     );

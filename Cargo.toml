@@ -14,6 +14,17 @@ category = "Music"
 short_description = "A local-first, privacy-focused podcast client"
 long_description = "RCast is a desktop podcast client built around a simple belief: your listening habits are your own business. No accounts, no algorithms, no cloud."
 osx_minimum_system_version = "11.0"
+icon = [
+    "assets/icons/icon-256x256.png",
+    "assets/icons/icon-128x128.png",
+    "assets/icons/icon-32x32.png"
+]
+
+[package.metadata.bundle.windows]
+wix_upgrade_guid = "CC9A64F1-AC2C-44E3-A3AB-73D397FE15DB"
+
+[package.metadata.bundle.osx]
+icon = ["assets/icons/icon.icns"]
 
 [dependencies]
 eframe = "0.34.2"

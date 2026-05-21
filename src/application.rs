@@ -11,9 +11,10 @@ use crate::events::AppEvent;
 use crate::hotkeys::HotkeyManager;
 use crate::pages::{home::HomePage, podcast_detail::PodcastDetailPage, settings::SettingsPage};
 use crate::ports::{FilePicker, FolderPicker};
+use crate::design::{visuals::build_visuals, ThemeTokens};
 use crate::state::AppState;
 use crate::tray::AppTray;
-use crate::types::Page;
+use crate::types::{Page, ThemeMode};
 
 pub struct RCast {
     pub cmd_tx: UnboundedSender<AppCommand>,
@@ -67,7 +68,7 @@ impl RCast {
         }
     }
 
-    fn handle_event(&mut self, event: AppEvent) {
+    fn handle_event(&mut self, event: AppEvent, ctx: &egui::Context) {
         match event {
             // Navigation
             AppEvent::NavigatedTo(page) => {
@@ -191,20 +192,28 @@ impl RCast {
             // Settings
             AppEvent::SettingsLoaded(settings) => {
                 self.audio_player.set_volume(settings.default_volume);
-                // Apply hotkeys from freshly loaded settings
                 if let Some(hk) = &mut self.hotkeys {
                     hk.apply_settings(&settings.hotkeys);
                 }
+                self.state.theme = match settings.theme {
+                    ThemeMode::Dark => ThemeTokens::dark(),
+                    ThemeMode::Light => ThemeTokens::light(),
+                };
+                ctx.set_visuals(build_visuals(&self.state.theme));
                 self.state.settings = settings.clone();
                 self.settings_page.load(settings);
             }
             AppEvent::SettingsSaved => {
                 // state.settings was already updated by the UI before dispatching SaveSettings.
-                // Re-apply hotkeys with the current (already-updated) settings.
                 let hotkey_settings = self.state.settings.hotkeys.clone();
                 if let Some(hk) = &mut self.hotkeys {
                     hk.apply_settings(&hotkey_settings);
                 }
+                self.state.theme = match self.state.settings.theme {
+                    ThemeMode::Dark => ThemeTokens::dark(),
+                    ThemeMode::Light => ThemeTokens::light(),
+                };
+                ctx.set_visuals(build_visuals(&self.state.theme));
             }
 
             AppEvent::OpmlImported {
@@ -317,7 +326,7 @@ impl eframe::App for RCast {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Drain all pending background events
         while let Ok(event) = self.event_rx.try_recv() {
-            self.handle_event(event);
+            self.handle_event(event, ctx);
         }
 
         // Poll system tray events
@@ -378,6 +387,7 @@ impl eframe::App for RCast {
                 now_playing_id,
                 current_pos,
                 &self.cmd_tx,
+                &self.state.theme,
             );
             if let Some(seek_to) = self.notes_panel.seek_request.take() {
                 self.audio_player.seek(seek_to);
@@ -436,6 +446,7 @@ impl eframe::App for RCast {
                     &self.audio_player,
                     &now_playing_ctx,
                     &mut self.home_page.media_state,
+                    &self.state.theme,
                 );
 
                 match action {
@@ -525,11 +536,11 @@ impl eframe::App for RCast {
         });
 
         // Add Podcast modal
-        if let Some(url) = self.add_podcast_modal.render(&ctx) {
+        if let Some(url) = self.add_podcast_modal.render(&ctx, &self.state.theme) {
             let _ = self.cmd_tx.send(AppCommand::AddPodcast { feed_url: url });
         }
 
         // Toast overlay
-        toast::render(&ctx, &mut self.state.toasts);
+        toast::render(&ctx, &mut self.state.toasts, &self.state.theme);
     }
 }

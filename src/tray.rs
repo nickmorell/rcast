@@ -62,11 +62,11 @@ impl AppTray {
 }
 
 fn make_icon() -> tray_icon::Icon {
-    // 32×32 solid green square as a placeholder icon
-    let size = 32u32;
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    for _ in 0..size * size {
-        rgba.extend_from_slice(&[0x1a_u8, 0x8a, 0x42, 0xff]);
-    }
-    tray_icon::Icon::from_rgba(rgba, size, size).expect("valid icon data")
+    let icon_data = include_bytes!("../assets/icons/icon-128x128.png");
+    let icon_image = image::load_from_memory(icon_data)
+        .expect("Failed to load tray icon")
+        .to_rgba8();
+    let (width, height) = icon_image.dimensions();
+    tray_icon::Icon::from_rgba(icon_image.to_vec(), width, height)
+        .expect("valid icon data")
 }

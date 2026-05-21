@@ -4,17 +4,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::AppCommand;
 use crate::db::models::Bookmark;
-
-// Colour palette
-
-const BG: Color32 = Color32::from_rgb(22, 22, 26);
-const SURFACE: Color32 = Color32::from_rgb(32, 32, 38);
-const MUTED: Color32 = Color32::from_rgb(130, 130, 140);
-const TIMESTAMP_BG: Color32 = Color32::from_rgb(45, 65, 110);
-const TIMESTAMP_FG: Color32 = Color32::from_rgb(140, 180, 255);
-const PODCAST_NOTE_BG: Color32 = Color32::from_rgb(40, 38, 60);
-const DELETE_RED: Color32 = Color32::from_rgb(200, 70, 70);
-const CONFIRM_BG: Color32 = Color32::from_rgb(55, 30, 30);
+use crate::design::spacing::*;
+use crate::design::tokens::ThemeTokens;
+use crate::design::typography::*;
 
 #[derive(Default)]
 pub struct NotesPanel {
@@ -52,6 +44,7 @@ impl NotesPanel {
         self.visible = false;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         ui: &mut egui::Ui,
@@ -60,6 +53,7 @@ impl NotesPanel {
         now_playing_episode_id: Option<i32>,
         current_position: f64,
         cmd_tx: &UnboundedSender<AppCommand>,
+        t: &ThemeTokens,
     ) {
         if !self.visible {
             return;
@@ -76,7 +70,7 @@ impl NotesPanel {
             .resizable(false)
             .exact_size(310.0)
             .frame(egui::Frame {
-                fill: BG,
+                fill: t.page_bg,
                 inner_margin: egui::Margin::symmetric(0, 0),
                 ..Default::default()
             })
@@ -85,16 +79,16 @@ impl NotesPanel {
 
                 // Header
                 egui::Frame::new()
-                    .fill(SURFACE)
+                    .fill(t.card_bg)
                     .inner_margin(egui::Margin::symmetric(14, 12))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.label(RichText::new("Notes").strong().size(13.0).color(MUTED));
-                                ui.add_space(2.0);
+                                ui.label(text_label("Notes", t));
+                                ui.add_space(SPACE_1 / 2.0);
                                 let title = truncate(&self.episode_title, 38);
-                                ui.label(RichText::new(title).strong().size(14.0));
+                                ui.label(text_body(title, t));
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -102,7 +96,7 @@ impl NotesPanel {
                                     .button(
                                         RichText::new(egui_phosphor::regular::X)
                                             .size(14.0)
-                                            .color(MUTED),
+                                            .color(t.text_meta),
                                     )
                                     .clicked()
                                 {
@@ -111,23 +105,19 @@ impl NotesPanel {
                             });
                         });
 
-                        ui.add_space(6.0);
+                        ui.add_space(SPACE_1 + 2.0);
 
                         // Status pill — live stamp vs. general note
                         let (dot, label, dot_color) = if is_live {
-                            (
-                                "●",
-                                "Stamping to current time",
-                                Color32::from_rgb(80, 200, 100),
-                            )
+                            ("●", "Stamping to current time", t.success)
                         } else {
-                            ("○", "Not playing — notes saved without timestamp", MUTED)
+                            ("○", "Not playing — notes saved without timestamp", t.text_meta)
                         };
 
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(dot).size(10.0).color(dot_color));
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(label).size(11.0).color(MUTED));
+                            ui.add_space(ICON_GAP);
+                            ui.label(text_hint(label, t));
                         });
                     });
 
@@ -141,7 +131,7 @@ impl NotesPanel {
 
                         // New note input
                         egui::Frame::new()
-                            .fill(SURFACE)
+                            .fill(t.card_bg)
                             .inner_margin(egui::Margin::symmetric(14, 10))
                             .show(ui, |ui| {
                                 ui.set_width(ui.available_width());
@@ -153,13 +143,11 @@ impl NotesPanel {
 
                                 let response = ui.add(input);
 
-                                // Enter while focused (without Shift) submits.
-                                // lost_focus() does not fire on Enter in multiline TextEdit.
                                 let enter_pressed = response.has_focus()
                                     && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     && !ui.input(|i| i.modifiers.shift);
 
-                                ui.add_space(6.0);
+                                ui.add_space(SPACE_1 + 2.0);
 
                                 let text = self.input_text.trim().to_string();
                                 let add_clicked = ui
@@ -168,17 +156,13 @@ impl NotesPanel {
                                         egui::Button::new(
                                             egui::RichText::new("Add Note").size(12.0),
                                         )
-                                        .fill(Color32::from_rgb(50, 90, 160))
+                                        .fill(t.accent)
                                         .min_size(egui::vec2(80.0, 26.0)),
                                     )
                                     .clicked();
 
                                 if (enter_pressed || add_clicked) && !text.is_empty() {
-                                    let position = if is_live {
-                                        Some(current_position)
-                                    } else {
-                                        None
-                                    };
+                                    let position = if is_live { Some(current_position) } else { None };
                                     let _ = cmd_tx.send(AppCommand::AddBookmark {
                                         podcast_id: self.podcast_id.unwrap_or(0),
                                         episode_id: self.episode_id,
@@ -189,15 +173,15 @@ impl NotesPanel {
                                 }
                             });
 
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_2);
 
                         // Podcast-level notes
                         if !podcast_bookmarks.is_empty() {
-                            section_label(ui, "PODCAST");
+                            section_label(ui, "PODCAST", t);
                             for b in podcast_bookmarks {
-                                self.render_note(ui, b, false, cmd_tx);
+                                self.render_note(ui, b, false, cmd_tx, t);
                             }
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_2);
                         }
 
                         // Timed episode notes
@@ -211,42 +195,38 @@ impl NotesPanel {
                             .collect();
 
                         if !timed.is_empty() {
-                            section_label(ui, "TIMED");
+                            section_label(ui, "TIMED", t);
                             for b in &timed {
-                                self.render_note(ui, b, true, cmd_tx);
+                                self.render_note(ui, b, true, cmd_tx, t);
                             }
-                            ui.add_space(8.0);
+                            ui.add_space(SPACE_2);
                         }
 
                         // General episode notes
                         if !untimed.is_empty() {
-                            section_label(ui, "GENERAL");
+                            section_label(ui, "GENERAL", t);
                             for b in &untimed {
-                                self.render_note(ui, b, false, cmd_tx);
+                                self.render_note(ui, b, false, cmd_tx, t);
                             }
                         }
 
                         // Empty state
                         if podcast_bookmarks.is_empty() && episode_bookmarks.is_empty() {
-                            ui.add_space(32.0);
+                            ui.add_space(SPACE_5);
                             ui.vertical_centered(|ui| {
                                 ui.label(
                                     RichText::new(egui_phosphor::regular::NOTE_PENCIL)
                                         .size(40.0)
-                                        .color(Color32::from_rgb(60, 60, 70)),
+                                        .color(t.text_disabled),
                                 );
-                                ui.add_space(8.0);
-                                ui.label(RichText::new("No notes yet").size(13.0).color(MUTED));
-                                ui.add_space(4.0);
-                                ui.label(
-                                    RichText::new("Start writing above")
-                                        .size(11.0)
-                                        .color(Color32::from_rgb(80, 80, 90)),
-                                );
+                                ui.add_space(SPACE_2);
+                                ui.label(text_body("No notes yet", t));
+                                ui.add_space(SPACE_1);
+                                ui.label(text_hint("Start writing above", t));
                             });
                         }
 
-                        ui.add_space(20.0);
+                        ui.add_space(SPACE_4 + SPACE_1);
                     });
             });
     }
@@ -257,22 +237,15 @@ impl NotesPanel {
         bookmark: &Bookmark,
         show_timestamp: bool,
         cmd_tx: &UnboundedSender<AppCommand>,
+        t: &ThemeTokens,
     ) {
         let id = bookmark.id;
         let is_editing = self.edit_id == Some(id);
         let is_confirming_delete = self.delete_confirm_id == Some(id);
         let is_podcast_note = bookmark.episode_id.is_none();
 
-        let base_fill = if is_podcast_note {
-            PODCAST_NOTE_BG
-        } else {
-            SURFACE
-        };
-        let hover_fill = if is_podcast_note {
-            Color32::from_rgb(52, 50, 75)
-        } else {
-            Color32::from_rgb(42, 42, 50)
-        };
+        let base_fill = if is_podcast_note { t.input_bg } else { t.card_bg };
+        let hover_fill = t.hover_bg;
 
         let is_hovered = ui.rect_contains_pointer(ui.cursor().expand(200.0));
         let frame_fill = if is_hovered { hover_fill } else { base_fill };
@@ -284,9 +257,14 @@ impl NotesPanel {
                 ui.set_width(ui.available_width());
 
                 if is_confirming_delete {
-                    // Inline delete confirmation
+                    let confirm_bg = Color32::from_rgba_premultiplied(
+                        t.error.r() / 4,
+                        t.error.g() / 4,
+                        t.error.b() / 4,
+                        180,
+                    );
                     egui::Frame::new()
-                        .fill(CONFIRM_BG)
+                        .fill(confirm_bg)
                         .corner_radius(6)
                         .inner_margin(egui::Margin::symmetric(8, 6))
                         .show(ui, |ui| {
@@ -294,9 +272,9 @@ impl NotesPanel {
                             ui.label(
                                 RichText::new("Delete this note?")
                                     .size(12.0)
-                                    .color(Color32::from_rgb(230, 130, 130)),
+                                    .color(t.error),
                             );
-                            ui.add_space(6.0);
+                            ui.add_space(SPACE_1 + 2.0);
                             ui.horizontal(|ui| {
                                 if ui
                                     .add(
@@ -305,29 +283,27 @@ impl NotesPanel {
                                                 .size(12.0)
                                                 .color(Color32::WHITE),
                                         )
-                                        .fill(DELETE_RED),
+                                        .fill(t.error),
                                     )
                                     .clicked()
                                 {
                                     let _ = cmd_tx.send(AppCommand::DeleteBookmark(id));
                                     self.delete_confirm_id = None;
                                 }
-                                ui.add_space(8.0);
+                                ui.add_space(SPACE_2);
                                 if ui.button(RichText::new("Keep").size(12.0)).clicked() {
                                     self.delete_confirm_id = None;
                                 }
                             });
                         });
                 } else if is_editing {
-                    // Inline edit mode
                     if self.edit_id == Some(id) && self.edit_text.is_empty() {
                         self.edit_text = bookmark.note_text.clone();
                     }
 
-                    // Show locked timestamp if present (not seekable in edit mode)
                     if show_timestamp && let Some(pos) = bookmark.position_seconds {
-                        let _ = timestamp_badge(ui, pos);
-                        ui.add_space(6.0);
+                        let _ = timestamp_badge(ui, pos, t);
+                        ui.add_space(SPACE_1 + 2.0);
                     }
 
                     let edit_input = egui::TextEdit::multiline(&mut self.edit_text)
@@ -336,18 +312,17 @@ impl NotesPanel {
 
                     let resp = ui.add(edit_input);
 
-                    // Escape cancels, Enter saves
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                         self.edit_id = None;
                         self.edit_text.clear();
                     }
 
-                    ui.add_space(6.0);
+                    ui.add_space(SPACE_1 + 2.0);
                     ui.horizontal(|ui| {
                         if ui
                             .add(
                                 egui::Button::new(RichText::new("Save").size(12.0))
-                                    .fill(Color32::from_rgb(50, 90, 160)),
+                                    .fill(t.accent),
                             )
                             .clicked()
                         {
@@ -361,7 +336,7 @@ impl NotesPanel {
                             self.edit_id = None;
                             self.edit_text.clear();
                         }
-                        ui.add_space(8.0);
+                        ui.add_space(SPACE_2);
                         if ui.button(RichText::new("Cancel").size(12.0)).clicked() {
                             self.edit_id = None;
                             self.edit_text.clear();
@@ -369,35 +344,22 @@ impl NotesPanel {
                     });
                 } else {
                     // Normal read mode
-                    // Timestamp badge — clicking seeks to that position
                     if show_timestamp && let Some(pos) = bookmark.position_seconds {
-                        let resp = timestamp_badge(ui, pos);
+                        let resp = timestamp_badge(ui, pos, t);
                         if resp.clicked() {
                             self.seek_request = Some(Duration::from_secs_f64(pos));
                         }
                         resp.on_hover_text("Click to seek");
-                        ui.add_space(4.0);
+                        ui.add_space(ICON_GAP);
                     }
 
                     ui.horizontal(|ui| {
                         let currently_hovered = ui.ui_contains_pointer();
 
-                        ui.label(
-                            RichText::new(&bookmark.note_text)
-                                .size(13.0)
-                                .color(Color32::from_rgb(210, 210, 215)),
-                        );
+                        ui.label(text_body(&bookmark.note_text, t));
 
-                        let icon_color = if currently_hovered {
-                            Color32::from_rgb(200, 200, 210)
-                        } else {
-                            Color32::from_rgb(100, 100, 115)
-                        };
-                        let delete_color = if currently_hovered {
-                            DELETE_RED
-                        } else {
-                            Color32::from_rgb(100, 100, 115)
-                        };
+                        let icon_color = if currently_hovered { t.text_secondary } else { t.text_disabled };
+                        let delete_color = if currently_hovered { t.error } else { t.text_disabled };
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
@@ -414,7 +376,7 @@ impl NotesPanel {
                                 self.delete_confirm_id = Some(id);
                             }
 
-                            ui.add_space(4.0);
+                            ui.add_space(ICON_GAP);
 
                             if ui
                                 .button(
@@ -439,38 +401,30 @@ impl NotesPanel {
                 }
             });
 
-        // Thin separator between notes
         ui.painter().line_segment(
             [
                 note_rect.response.rect.left_bottom(),
                 note_rect.response.rect.right_bottom(),
             ],
-            egui::Stroke::new(1.0, Color32::from_rgb(38, 38, 45)),
+            egui::Stroke::new(1.0, t.divider),
         );
     }
 }
 
-// Helpers
-
-fn section_label(ui: &mut Ui, text: &str) {
+fn section_label(ui: &mut Ui, text: &str, t: &ThemeTokens) {
     egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: 14,
-            right: 14,
-            top: 6,
-            bottom: 4,
-        })
+        .inner_margin(egui::Margin { left: 14, right: 14, top: 6, bottom: 4 })
         .show(ui, |ui| {
             ui.label(
                 RichText::new(text)
-                    .size(10.0)
-                    .color(Color32::from_rgb(90, 90, 100))
+                    .size(FONT_XS)
+                    .color(t.text_disabled)
                     .strong(),
             );
         });
 }
 
-fn timestamp_badge(ui: &mut Ui, position_seconds: f64) -> egui::Response {
+fn timestamp_badge(ui: &mut Ui, position_seconds: f64, t: &ThemeTokens) -> egui::Response {
     let secs = position_seconds as u64;
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
@@ -485,9 +439,9 @@ fn timestamp_badge(ui: &mut Ui, position_seconds: f64) -> egui::Response {
         egui::Button::new(
             egui::RichText::new(label)
                 .font(egui::FontId::monospace(11.0))
-                .color(TIMESTAMP_FG),
+                .color(t.accent),
         )
-        .fill(TIMESTAMP_BG)
+        .fill(t.accent_tint)
         .corner_radius(4.0)
         .min_size(egui::vec2(52.0, 18.0)),
     )
