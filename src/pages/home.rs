@@ -17,6 +17,12 @@ pub struct HomePage {
     search_query: String,
     sort_order: SortOrder,
     pub media_state: MediaControlsState,
+    cached_podcast_ids: Vec<i32>,
+    last_search_query: String,
+    last_sort_order: SortOrder,
+    last_podcast_count: usize,
+    pending_density: Option<crate::types::HomeDensity>,
+    frames_since_density_change: u32,
 }
 
 impl Default for HomePage {
@@ -25,6 +31,12 @@ impl Default for HomePage {
             search_query: String::new(),
             sort_order: SortOrder::AToZ,
             media_state: MediaControlsState::default(),
+            cached_podcast_ids: Vec::new(),
+            last_search_query: String::new(),
+            last_sort_order: SortOrder::AToZ,
+            last_podcast_count: 0,
+            pending_density: None,
+            frames_since_density_change: 0,
         }
     }
 }
@@ -119,7 +131,8 @@ impl HomePage {
                         && !is_list
                     {
                         state.settings.home_density = HomeDensity::List;
-                        let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                        self.pending_density = Some(HomeDensity::List);
+                        self.frames_since_density_change = 0;
                     }
 
                     if ui
@@ -133,7 +146,8 @@ impl HomePage {
                         && is_list
                     {
                         state.settings.home_density = HomeDensity::Grid;
-                        let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                        self.pending_density = Some(HomeDensity::Grid);
+                        self.frames_since_density_change = 0;
                     }
                 });
             });
@@ -141,28 +155,46 @@ impl HomePage {
             ui.add_space(SPACE_3);
             divider(ui, &t);
 
-            // ── Filter + sort ─────────────────────────────────────────────────
-            let query = self.search_query.to_lowercase();
-            let mut filtered: Vec<&Podcast> = state
-                .podcasts
-                .iter()
-                .filter(|p| {
-                    query.is_empty()
-                        || p.title.to_lowercase().contains(&query)
-                        || p.description.to_lowercase().contains(&query)
-                })
-                .collect();
+            // ── Filter + sort + cache ──────────────────────────────────────────
+            let query_lower = self.search_query.to_lowercase();
+            let podcasts_changed = state.podcasts.len() != self.last_podcast_count;
+            let should_recalculate = podcasts_changed
+                || self.last_search_query != query_lower
+                || self.last_sort_order != self.sort_order;
 
-            match self.sort_order {
-                SortOrder::AToZ => filtered.sort_by(|a, b| a.title.cmp(&b.title)),
-                SortOrder::ZToA => filtered.sort_by(|a, b| b.title.cmp(&a.title)),
-                SortOrder::PublishDateAsc => filtered.sort_by_key(|p| p.updated_at),
-                SortOrder::PublishDateDesc => {
-                    filtered.sort_by_key(|p| std::cmp::Reverse(p.updated_at))
+            if should_recalculate {
+                let mut filtered: Vec<&Podcast> = state
+                    .podcasts
+                    .iter()
+                    .filter(|p| {
+                        query_lower.is_empty()
+                            || p.title.to_lowercase().contains(&query_lower)
+                            || p.description.to_lowercase().contains(&query_lower)
+                    })
+                    .collect();
+
+                match self.sort_order {
+                    SortOrder::AToZ => filtered.sort_by(|a, b| a.title.cmp(&b.title)),
+                    SortOrder::ZToA => filtered.sort_by(|a, b| b.title.cmp(&a.title)),
+                    SortOrder::PublishDateAsc => filtered.sort_by_key(|p| p.updated_at),
+                    SortOrder::PublishDateDesc => {
+                        filtered.sort_by_key(|p| std::cmp::Reverse(p.updated_at))
+                    }
                 }
+
+                self.cached_podcast_ids = filtered.iter().map(|p| p.id).collect();
+                self.last_search_query = query_lower.clone();
+                self.last_sort_order = self.sort_order;
+                self.last_podcast_count = state.podcasts.len();
             }
 
-            let podcast_ids: Vec<i32> = filtered.iter().map(|p| p.id).collect();
+            let podcast_id_map: std::collections::HashMap<i32, &Podcast> = state
+                .podcasts
+                .iter()
+                .map(|p| (p.id, p))
+                .collect();
+
+            let podcast_ids = &self.cached_podcast_ids;
             let density = state.settings.home_density;
 
             egui::ScrollArea::vertical()
@@ -177,53 +209,44 @@ impl HomePage {
                             .floor()
                             .max(1.0) as usize;
 
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.add_space(SPACE_2);
-                                for row in podcast_ids.chunks(cols) {
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(CARD_SPACING);
-                                        for id in row {
-                                            let Some(podcast) =
-                                                state.podcasts.iter().find(|p| p.id == *id)
-                                            else {
-                                                continue;
-                                            };
-                                            let is_playing = state
-                                                .now_playing
-                                                .as_ref()
-                                                .map(|np| np.podcast_id == podcast.id)
-                                                .unwrap_or(false);
-                                            let is_syncing =
-                                                state.syncing_podcast_ids.contains(&podcast.id);
+                        ui.add_space(SPACE_2);
+                        for row in podcast_ids.chunks(cols) {
+                            ui.horizontal(|ui| {
+                                ui.add_space(CARD_SPACING);
+                                for id in row {
+                                    let Some(podcast) = podcast_id_map.get(id) else {
+                                        continue;
+                                    };
+                                    let is_playing = state
+                                        .now_playing
+                                        .as_ref()
+                                        .map(|np| np.podcast_id == podcast.id)
+                                        .unwrap_or(false);
+                                    let is_syncing = state.syncing_podcast_ids.contains(&podcast.id);
 
-                                            if PodcastCard::new(
-                                                podcast,
-                                                &state.image_cache,
-                                                is_playing,
-                                                is_syncing,
-                                            )
-                                            .show(ui, &t)
-                                            .clicked()
-                                            {
-                                                let _ = cmd_tx.send(AppCommand::NavigateTo(
-                                                    Page::PodcastDetail(podcast.id),
-                                                ));
-                                            }
-                                            ui.add_space(CARD_SPACING);
-                                        }
-                                    });
+                                    if PodcastCard::new(
+                                        podcast,
+                                        &state.image_cache,
+                                        is_playing,
+                                        is_syncing,
+                                    )
+                                    .show(ui, &t)
+                                    .clicked()
+                                    {
+                                        let _ = cmd_tx.send(AppCommand::NavigateTo(
+                                            Page::PodcastDetail(podcast.id),
+                                        ));
+                                    }
                                     ui.add_space(CARD_SPACING);
                                 }
                             });
+                            ui.add_space(CARD_SPACING);
+                        }
                     }
                     HomeDensity::List => {
                         ui.set_width(ui.available_width());
-                        for id in &podcast_ids {
-                            let Some(podcast) =
-                                state.podcasts.iter().find(|p| p.id == *id)
-                            else {
+                        for id in podcast_ids {
+                            let Some(podcast) = podcast_id_map.get(id) else {
                                 continue;
                             };
                             let is_playing = state
@@ -250,6 +273,15 @@ impl HomePage {
                         }
                     }
                 });
+
+            // ── Debounced settings persistence ────────────────────────────────
+            if self.pending_density.is_some() {
+                self.frames_since_density_change += 1;
+                if self.frames_since_density_change >= 10 {
+                    let _ = cmd_tx.send(AppCommand::SaveSettings(state.settings.clone()));
+                    self.pending_density = None;
+                }
+            }
         });
     }
 }

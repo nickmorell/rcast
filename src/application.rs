@@ -34,6 +34,7 @@ pub struct RCast {
 
     pub tray: Option<AppTray>,
     pub hotkeys: Option<HotkeyManager>,
+    last_theme: crate::types::ThemeMode,
 }
 
 impl RCast {
@@ -65,6 +66,7 @@ impl RCast {
             settings_page,
             tray,
             hotkeys,
+            last_theme: crate::types::ThemeMode::Dark,
         }
     }
 
@@ -204,16 +206,19 @@ impl RCast {
                 self.settings_page.load(settings);
             }
             AppEvent::SettingsSaved => {
-                // state.settings was already updated by the UI before dispatching SaveSettings.
+                let new_theme = self.state.settings.theme;
+                if new_theme != self.last_theme {
+                    self.last_theme = new_theme;
+                    self.state.theme = match new_theme {
+                        crate::types::ThemeMode::Dark => ThemeTokens::dark(),
+                        crate::types::ThemeMode::Light => ThemeTokens::light(),
+                    };
+                    ctx.set_visuals(build_visuals(&self.state.theme));
+                }
                 let hotkey_settings = self.state.settings.hotkeys.clone();
                 if let Some(hk) = &mut self.hotkeys {
                     hk.apply_settings(&hotkey_settings);
                 }
-                self.state.theme = match self.state.settings.theme {
-                    ThemeMode::Dark => ThemeTokens::dark(),
-                    ThemeMode::Light => ThemeTokens::light(),
-                };
-                ctx.set_visuals(build_visuals(&self.state.theme));
             }
 
             AppEvent::OpmlImported {

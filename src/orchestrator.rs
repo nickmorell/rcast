@@ -77,14 +77,6 @@ impl Orchestrator {
             });
         }
 
-        {
-            let tx = self.event_tx.clone();
-            let db = self.db.clone();
-            tokio::spawn(async move {
-                background_sync(db, tx).await;
-            });
-        }
-
         let mut save_ticker = tokio::time::interval(std::time::Duration::from_secs(10));
         save_ticker.tick().await;
 

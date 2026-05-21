@@ -44,12 +44,9 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT p.id, p.url, p.title, p.description, p.image_url,
                         p.last_synced_at, p.created_at, p.updated_at,
-                        COUNT(e.id) as episode_count,
                         p.speed_preset, p.auto_download, p.keep_episodes_count,
                         p.skip_intro_seconds, p.skip_outro_seconds
                  FROM podcasts p
-                 LEFT JOIN episodes e ON e.podcast_id = p.id
-                 GROUP BY p.id
                  ORDER BY p.title",
             )?;
 
@@ -64,12 +61,12 @@ impl Database {
                         last_synced_at: row.get(5)?,
                         created_at: row.get(6)?,
                         updated_at: row.get(7)?,
-                        episode_count: row.get(8)?,
-                        speed_preset: row.get(9)?,
-                        auto_download: row.get::<_, Option<i32>>(10)?.map(|v| v != 0),
-                        keep_episodes_count: row.get(11)?,
-                        skip_intro_seconds: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
-                        skip_outro_seconds: row.get::<_, Option<i32>>(13)?.unwrap_or(0),
+                        episode_count: 0,
+                        speed_preset: row.get(8)?,
+                        auto_download: row.get::<_, Option<i32>>(9)?.map(|v| v != 0),
+                        keep_episodes_count: row.get(10)?,
+                        skip_intro_seconds: row.get::<_, Option<i32>>(11)?.unwrap_or(0),
+                        skip_outro_seconds: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
